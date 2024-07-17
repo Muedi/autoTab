@@ -4,7 +4,6 @@
 
 import torch
 
-
 def scatter_nd(
     indices: torch.Tensor, weights: torch.Tensor, shape: tuple
 ) -> torch.Tensor:
@@ -145,10 +144,21 @@ import pandas as pd
 # from cancernet.util import scatter_nd
 
 class FeatureLayer(torch.nn.Module):
-    """This layer will take our input data of size `(N_genes, N_features)`, and perform
+    """
+    Original notes:
+    This layer will take our input data of size `(N_genes, N_features)`, and perform
     elementwise multiplication of the features of each gene. This is effectively
     collapsing the `N_features dimension`, outputting a single scalar latent variable
     for each gene.
+
+    New notes: 
+    This is just a full mapping of everything that is put in the network to the genes
+    that are present in the pathway data that is used to generate the network. 
+    Since its weights are learnable and fully connected, the model learns, which feature 'belongs' to 
+    which gene.
+    => This is already intesting, it has no regularization, 
+    which would make the connections sparse after some learning and more interpretable?
+
     """
 
     def __init__(self, num_genes: int, num_features: int):
@@ -169,7 +179,16 @@ class FeatureLayer(torch.nn.Module):
 
 
 class SparseLayer(torch.nn.Module):
-    """Sparsely connected layer, with connections taken from pnet."""
+    """
+    Original notes:
+    Sparsely connected layer, with connections taken from pnet.
+    
+    New notes: 
+    As is the network builds itself, with an established mapping. 
+    We could build the AutoML as such, that it changes the mappings outside of the arch and not the weights,
+    I guess this will be less efficient and likely not implemented by another party,
+    but it would give us more control of the graph/pathways I guess.
+    """
 
     def __init__(self, layer_map):
         super().__init__()
