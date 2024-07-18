@@ -148,18 +148,23 @@ class ReactomeNetwork:
 
     def get_tree(self):
         """Find a spanning tree for the network."""
-        # convert to tree
+        # Convert to tree using BFS from root
         G = nx.bfs_tree(self.netx, "root")
-
         return G
 
     def get_completed_network(self, n_levels: int) -> nx.Graph:
-        """XXX What exactly does this do?"""
+        """Complete the network by ensuring all paths from root to leaves are of length `n_levels`.
+
+        This function extends the network by adding intermediate nodes where necessary.
+        """
         G = complete_network(self.netx, n_levels=n_levels)
         return G
 
     def get_completed_tree(self, n_levels: int) -> nx.Graph:
-        """XXX What exactly does this do?"""
+        """Complete the spanning tree by ensuring all paths from root to leaves are of length `n_levels`.
+
+        This function extends the tree by adding intermediate nodes where necessary.
+        """
         G = self.get_tree()
         G = complete_network(G, n_levels=n_levels)
         return G
@@ -167,7 +172,10 @@ class ReactomeNetwork:
     def get_layers(
         self, n_levels: int, direction: str = "root_to_leaf"
     ) -> List[Dict[str, List[str]]]:
-        """XXX What exactly does this do?"""
+        """Generate layers of nodes from root to leaves or vice versa.
+
+        Depending on the direction specified, this function returns the layers of the network.
+        """
         if direction == "root_to_leaf":
             net = self.get_completed_network(n_levels)
             layers = get_layers_from_net(net, n_levels)
@@ -176,11 +184,11 @@ class ReactomeNetwork:
             layers = get_layers_from_net(net, 5)
             layers = layers[5 - n_levels : 5]
 
-        # get the last layer (genes level)
+        # Get the last layer (genes level)
         terminal_nodes = [
             n for n, d in net.out_degree() if d == 0
-        ]  # set of terminal pathways
-        # we need to find genes belonging to these pathways
+        ]  # Set of terminal pathways
+        # Find genes belonging to these pathways
         genes_df = self.reactome.pathway_genes
 
         dict = {}
@@ -196,9 +204,6 @@ class ReactomeNetwork:
         return layers
 
 
-# XXX what are these functions for?
-
-
 def get_layer_maps(
     reactome: ReactomeNetwork,
     genes,
@@ -207,14 +212,18 @@ def get_layer_maps(
     add_unk_genes: bool = False,
     verbose: bool = False,
 ) -> List[pd.DataFrame]:
-    """XXX What does this do exactly?"""
+    """Generate mapping matrices for each layer of the reactome network.
+
+    This function generates a list of DataFrames where each DataFrame represents
+    the presence/absence of genes in different pathways at each layer.
+    """
     reactome_layers = reactome.get_layers(n_levels, direction)
-    # add sort for reproducibility; FZZ 2022.10.12
+    # Add sort for reproducibility; FZZ 2022.10.12
     filtering_index = sorted(genes)
     maps = []
     for i, layer in enumerate(reactome_layers[::-1]):
         if verbose:
-            # XXX it's actually layer n - i - 1, since we flipped reactome_layers!
+            # Note: it's actually layer n - i - 1, since we flipped reactome_layers!
             print("layer #", i)
         crt_map = get_map_from_layer(layer)
         filter_df = pd.DataFrame(index=filtering_index)
@@ -227,7 +236,7 @@ def get_layer_maps(
             print("filtered_map", filter_df.shape)
 
         if add_unk_genes:
-            # add a node for genes without known reactome annotation
+            # Add a node for genes without known reactome annotation
             if verbose:
                 print("UNK")
             filtered_map["UNK"] = 0
@@ -240,11 +249,11 @@ def get_layer_maps(
         # filtering_index = list(filtered_map.columns)
         filtering_index = filtered_map.columns
         if verbose:
-            # XXX it's actually layer n - i - 1, since we flipped reactome_layers!
+            # Note: it's actually layer n - i - 1, since we flipped reactome_layers!
             logging.info(
                 "layer {} , # of edges  {}".format(i, filtered_map.sum().sum())
             )
-        # sort rows and cols for reproducibility; FZZ 2020.10.12
+        # Sort rows and cols for reproducibility; FZZ 2020.10.12
         filtered_map = filtered_map[sorted(filtered_map.columns)]
         filtered_map = filtered_map.loc[sorted(filtered_map.index)]
         maps.append(filtered_map)
@@ -252,11 +261,15 @@ def get_layer_maps(
 
 
 def get_map_from_layer(layer_dict: Dict[str, Sequence[str]]) -> pd.DataFrame:
-    """XXX What does this do exactly?"""
+    """Generate a mapping DataFrame from pathways to genes.
+
+    This function creates a binary matrix indicating the presence (1) or absence (0)
+    of genes in each pathway based on the given layer dictionary.
+    """
     pathways = list(layer_dict.keys())
     print("pathways", len(pathways))
     genes = list(itertools.chain.from_iterable(list(layer_dict.values())))
-    # add sort for reproducibility; FZZ 2022.10.12
+    # Add sort for reproducibility; FZZ 2022.10.12
     genes = sorted(list(np.unique(genes)))
     print("genes", len(genes))
 
@@ -273,13 +286,13 @@ def get_map_from_layer(layer_dict: Dict[str, Sequence[str]]) -> pd.DataFrame:
     return df.T
 
 
-# utility functions used by the ReactomeNetwork
+# Utility functions used by the ReactomeNetwork
 
 
 def add_edges(G: nx.Graph, node: str, n_levels: int) -> nx.Graph:
     """Make a chain from `node` to `n_levels` copies, building the copies if needed.
 
-    node -> node_copy1 -> ... -> node_copy<n_levels>
+    Creates a series of edges: node -> node_copy1 -> ... -> node_copy<n_levels>
     """
     edges = []
     source = node
@@ -294,13 +307,16 @@ def add_edges(G: nx.Graph, node: str, n_levels: int) -> nx.Graph:
 
 
 def complete_network(G: nx.Graph, n_levels: int = 4) -> nx.Graph:
-    """XXX What exactly does this do?"""
-    # subgraph of neighbors within given radius from root
+    """Complete the network by adding intermediate nodes to ensure all paths from root to leaves are of length `n_levels`.
+
+    This function extends the network by ensuring that paths from the root node to any leaf node are of a specified length.
+    """
+    # Subgraph of neighbors within given radius from root
     sub_graph = nx.ego_graph(G, "root", radius=n_levels)
     terminal_nodes = [n for n, d in sub_graph.out_degree() if d == 0]
     for node in terminal_nodes:
         distance = len(nx.shortest_path(sub_graph, source="root", target=node))
-        # XXX doesn't choosing the ego_graph ensure that distance <= n_levels?
+        # Ensure that the distance to the root is less than or equal to n_levels
         if distance <= n_levels:
             diff = n_levels - distance + 1
             sub_graph = add_edges(sub_graph, node, diff)
@@ -310,11 +326,10 @@ def complete_network(G: nx.Graph, n_levels: int = 4) -> nx.Graph:
 
 def get_nodes_at_level(net: nx.Graph, distance: int) -> List[str]:
     """Get all the nodes within the given `distance` from the `root`."""
-    # get all nodes within distance around the query node
+    # Get all nodes within distance around the query node
     nodes = set(nx.ego_graph(net, "root", radius=distance))
 
-    # XXX a single BFS traversal of the graph should be enough
-    # remove nodes that are not **at** the specified distance but closer
+    # Remove nodes that are not **at** the specified distance but closer
     if distance >= 1:
         nodes -= set(nx.ego_graph(net, "root", radius=distance - 1))
 
@@ -322,15 +337,18 @@ def get_nodes_at_level(net: nx.Graph, distance: int) -> List[str]:
 
 
 def get_layers_from_net(net: nx.Graph, n_levels: int) -> List[Dict[str, List[str]]]:
-    """XXX What exactly does this do?"""
+    """Generate layers of nodes from the network up to `n_levels`.
+
+    This function returns a list of dictionaries, where each dictionary represents a layer.
+    The keys are pathway names and the values are lists of child pathways or genes.
+    """
     layers = []
     for i in range(n_levels):
-        # XXX a single traversal should be enough to find all the distances
+        # Get nodes at the specified distance
         nodes = get_nodes_at_level(net, i)
         dict = {}
         for n in nodes:
-            # find "original" node that copies came from
-            # XXX using a regex for this is terribly inefficient
+            # Find "original" node that copies came from
             n_name = re.sub("_copy.*", "", n)
             next = net.successors(n)
             dict[n_name] = [re.sub("_copy.*", "", nex) for nex in next]
