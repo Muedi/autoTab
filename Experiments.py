@@ -124,3 +124,41 @@ trainer = pl.Trainer(
 trainer.fit(model, train_loader, valid_loader)
 print(f"Training took {time.time() - t0:.1f} seconds.")
 # %%
+
+
+# %%
+fpr_train, tpr_train, train_auc, _, _ = get_metrics(model, train_loader,exp=False)
+fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(model, valid_loader,exp=False)
+
+fig, ax = plt.subplots()
+ax.plot(fpr_train, tpr_train, lw=2, label="train (area = %0.3f)" % train_auc)
+ax.plot(fpr_valid, tpr_valid, lw=2, label="validation (area = %0.3f)" % valid_auc)
+ax.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
+ax.set_xlim([0.0, 1.0])
+ax.set_ylim([0.0, 1.05])
+ax.set_xlabel("False Positive Rate")
+ax.set_ylabel("True Positive Rate")
+ax.set_title("Receiver operating characteristic")
+ax.legend(loc="lower right", frameon=False)
+
+print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
+print("auc", valid_auc)
+print("aupr", average_precision_score(ys, outs[:, 1]))
+print("f1", f1_score(ys, outs[:, 1] > 0.5))
+print("precision", precision_score(ys, outs[:, 1] > 0.5))
+print("recall", recall_score(ys, outs[:, 1] > 0.5))
+
+test_loader = DataLoader(
+    dataset,
+    batch_size=batch_size,
+    sampler=SubsetRandomSampler(dataset.test_idx),
+    drop_last=True,
+)
+fpr_test, tpr_test, test_auc, ys, outs = get_metrics(model, test_loader,exp=False)
+
+print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
+print("auc", test_auc)
+print("aupr", average_precision_score(ys, outs[:, 1]))
+print("f1", f1_score(ys, outs[:, 1] > 0.5))
+print("precision", precision_score(ys, outs[:, 1] > 0.5))
+print("recall", recall_score(ys, outs[:, 1] > 0.5))
