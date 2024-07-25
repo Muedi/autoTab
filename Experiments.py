@@ -9,6 +9,10 @@ from torch.utils.data.sampler import SubsetRandomSampler
 from torch_geometric.loader import DataLoader
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
+
+from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks.progress.progress_bar import ProgressBar
+
 from sklearn.metrics import (
     roc_auc_score,
     roc_curve,
@@ -22,6 +26,8 @@ from sklearn.metrics import (
 )
 
 from src import *
+
+
 
 # from cancernet.arch import PNet
 # from cancernet.util import ProgressBar, InMemoryLogger, get_roc
@@ -81,3 +87,40 @@ pl.seed_everything(42, workers=True)
 n_epochs = 100
 batch_size = 10
 lr = 0.001
+
+num_workers = 0
+train_loader = DataLoader(
+    dataset,
+    batch_size=batch_size,
+    sampler=SubsetRandomSampler(dataset.train_idx),
+    num_workers=num_workers,
+)
+valid_loader = DataLoader(
+    dataset,
+    batch_size=batch_size,
+    sampler=SubsetRandomSampler(dataset.valid_idx),
+    num_workers=num_workers,
+)
+
+# %%
+model = PNet(
+    layers=maps,
+    num_genes=maps[0].shape[0], # 9054
+    lr=lr
+)
+
+print("Number of params:",sum(p.numel() for p in model.parameters()))
+logger = WandbLogger()
+pbar = ProgressBar()
+
+t0 = time.time()
+trainer = pl.Trainer(
+    accelerator="auto",
+    max_epochs=n_epochs,
+    callbacks=pbar,
+    logger=logger,
+    # deterministic=True,
+)
+trainer.fit(model, train_loader, valid_loader)
+print(f"Training took {time.time() - t0:.1f} seconds.")
+# %%

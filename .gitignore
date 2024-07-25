@@ -1,3 +1,6 @@
-/data/
-/literature/
-/lib/
+data/
+literature/
+lib/
+lightning_logs/
+src/__pycache__/*
+wandb/

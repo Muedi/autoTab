@@ -46,22 +46,25 @@ class BaseNet(pl.LightningModule):
 
     def __init__(self, lr: float = 0.01, scheduler: str="lambda"):
         super().__init__()
-
         self.lr = lr
-        self.scheduler=scheduler
+        self.scheduler = scheduler
+        # init lists to store outputs
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+        self.test_step_outputs = []
 
     def configure_optimizers(self) -> Tuple[List, List]:
         """Set up optimizers and schedulers.
         """
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
 
-        if self.scheduler=="lambda":
+        if self.scheduler == "lambda":
             lr_lambda = lambda epoch: 1.0 if epoch < 30 else 0.5 if epoch < 60 else 0.1
             scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-        elif self.scheduler=="pnet": ## Take scheduler from pnet
+        elif self.scheduler == "pnet":  # Take scheduler from pnet
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 50, gamma=0.25)
         else:
-            scheduler=None
+            scheduler = None
 
         return [optimizer], [scheduler]
 
@@ -79,7 +82,6 @@ class BaseNet(pl.LightningModule):
         # assess accuracy
         pred = y_hat.max(1)[1]
         correct = pred.eq(batch.y).sum().item()
-
         total = len(batch.y)
 
         batch_dict = {
@@ -95,9 +97,6 @@ class BaseNet(pl.LightningModule):
         epoch.
 
         Creates log entries with name `f"{kind}_loss"` and `f"{kind}_accuracy"`.
-
-        This function is used to implement the training, validation, and test epoch-end
-        functions.
         """
         with torch.no_grad():
             # calculate average loss and average accuracy
@@ -113,22 +112,32 @@ class BaseNet(pl.LightningModule):
         self.log(f"{kind}_accuracy", avg_acc)
 
     def training_step(self, batch, batch_idx) -> dict:
-        return self.step(batch, "train")
+        output = self.step(batch, "train")
+        self.training_step_outputs.append(output)
+        return output
 
     def validation_step(self, batch, batch_idx) -> dict:
-        return self.step(batch, "val")
+        output = self.step(batch, "val")
+        self.validation_step_outputs.append(output)
+        return output
 
     def test_step(self, batch, batch_idx) -> dict:
-        return self.step(batch, "test")
+        output = self.step(batch, "test")
+        self.test_step_outputs.append(output)
+        return output
 
-    def training_epoch_end(self, outputs):
-        self.epoch_end(outputs, "train")
+    def on_train_epoch_end(self):
+        self.epoch_end(self.training_step_outputs, "train")
+        self.training_step_outputs.clear()  # free memory
 
-    def validation_epoch_end(self, outputs):
-        self.epoch_end(outputs, "val")
+    def on_validation_epoch_end(self):
+        self.epoch_end(self.validation_step_outputs, "val")
+        self.validation_step_outputs.clear()  # free memory
 
-    def test_epoch_end(self, outputs):
-        self.epoch_end(outputs, "test")
+    def on_test_epoch_end(self):
+        self.epoch_end(self.test_step_outputs, "test")
+        self.test_step_outputs.clear()  # free memory
+
 
 # %%
 # the  PNET implementation
