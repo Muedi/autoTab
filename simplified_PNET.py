@@ -336,7 +336,9 @@ from typing import Optional, Callable
 
 import torch
 from torch.utils.data import Dataset
-
+from torch_geometric.data import InMemoryDataset, Data
+from torch_geometric.utils import remove_self_loops
+# from torch_sparse import coalesce
 
 # Change this ASAP, weird af....
 cached_data = {}  # all data read will be referenced here
@@ -529,8 +531,9 @@ def graph_reader_and_processor(graph_file):
                 elems = line.strip().split("\t")
                 if len(elems) == 0:
                     continue
-
-                assert len(elems) == 3
+                
+                # print(len(elems))
+                # assert len(elems) == 3
 
                 # symmetrize, since the initial graph contains edges in only one dir
                 edge_dict[elems[0]][elems[1]] = float(elems[2])
@@ -738,6 +741,225 @@ class PnetDataSet(Dataset):
             idx = idx.tolist()
 
         return self.x[idx],self.y[idx]
+    
+
+class GraphDataSet(InMemoryDataset):
+    """ PyG graph dataset to model genetic networks.
+        Edge connections are imported from https://hb.flatironinstitute.org/ """
+    def __init__(
+        self,
+        name="prostate_graph_humanbase",
+        edge_tol=0.5,
+        root: Optional[str] = "./data/prostate/",
+        files: Optional[dict] = None,
+        transform: Optional[Callable] = None,
+        pre_transform: Optional[Callable] = None,
+        valid_ratio: float = 0.102,
+        test_ratio: float = 0.102,
+        valid_seed: int = 0,
+        test_seed: int = 7357,
+    ):
+        # the base-class constructor will generate the processed file if it is missing
+        # self.all_data, self.response, self.edge_dict, self.edge_tol = all_data, response, edge_dict, edge_tol
+        self.edge_tol = edge_tol
+        self.name = name
+        self._files = files or {}
+        super().__init__(root, transform, pre_transform)
+
+        # load the processed dataset
+        self.data, self.slices = torch.load(self.processed_paths[0])
+        with open(os.path.join(self.root, "node_index.pkl"), "rb") as f:
+            self.node_index = pickle.load(f)
+        # call pyg
+        self.num_samples = len(self.data.y)
+        self.num_test_samples = int(test_ratio * self.num_samples)
+        self.num_valid_samples = int(valid_ratio * self.num_samples)
+        self.num_train_samples = (
+            self.num_samples - self.num_test_samples - self.num_valid_samples
+        )
+        self.split_index_by_rng(test_seed=test_seed, valid_seed=valid_seed)
+
+    def process(self):
+        t0 = time.time()
+        all_data, response, edge_dict = data_reader(filename_dict=self.raw_file_names)
+        print(f"read raw data took {time.time()-t0:.2f} seconds")
+        # response = pnet_utils.cached_data['response'].loc[all_data.index]
+        self.response, self.edge_dict = response, edge_dict
+        edge_tol = self.edge_tol
+        # match inputs
+        hb_genes = sorted([x for x in all_data.columns.levels[0] if x in edge_dict])
+        self.all_data = all_data[hb_genes]
+        node_index = {g: i for i, g in enumerate(hb_genes)}
+        self.node_index = node_index
+        with open(os.path.join(self.root, "node_index.pkl"), "wb") as f:
+            pickle.dump(node_index, f)
+        # convert and filter edges
+        edge_index = []
+        edge_att = []
+        for a in tqdm.tqdm(edge_dict, desc="filter by edge_tol"):
+            if not a in node_index:
+                continue
+            for b in edge_dict[a]:
+                if not b in node_index:
+                    continue
+                w = edge_dict[a][b]
+                if w > edge_tol:
+                    edge_index.append((node_index[a], node_index[b]))
+                    edge_att.append(w)
+
+        # ensure there are no self loops
+        edge_index = np.array(edge_index).T
+        edge_att = np.array(edge_att)
+        edge_index, edge_att = remove_self_loops(
+            torch.from_numpy(edge_index), torch.from_numpy(edge_att)
+        )
+        edge_index = edge_index.long()
+
+        # sort indices and add weights for duplicated edges (we don't have any here, though)
+        num_nodes = len(hb_genes)
+        edge_index, edge_att = coalesce(edge_index, edge_att, num_nodes, num_nodes)
+        edge_att = edge_att.type(torch.float)
+
+        # build each data
+        data_list = []
+        for ind in range(self.all_data.shape[0]):
+            dat = Data(
+                edge_index=edge_index,
+                edge_attr=edge_att.type(torch.float),
+                x=torch.Tensor(self.all_data.iloc[ind].unstack().to_numpy()),
+                y=int(
+                    self.response.iloc[ind][0]
+                ),  # this place is really weird - if I don't pass int(),
+                # it will somehow mess up the slices['y']
+                subject_id=str(self.all_data.index[ind]),
+            )
+            data_list.append(dat)
+
+        # pre-filter and/or pre-transform, if necessary
+        if self.pre_filter is not None:
+            t0 = time.time()
+            data_list = [data for data in data_list if self.pre_filter(data)]
+            print(f"Pre-filtering took {time.time() - t0:.2f} seconds.")
+
+        if self.pre_transform is not None:
+            t0 = time.time()
+            data_list = [self.pre_transform(data) for data in data_list]
+            print(f"Pre-transforming took {time.time() - t0:.2f} seconds.")
+
+        self.data, self.slices = self.collate(data_list)
+        torch.save((self.data, self.slices), self.processed_paths[0])
+
+    def split_index_by_rng(self, test_seed, valid_seed):
+        # train/valid/test random generators
+        rng_test = np.random.default_rng(test_seed)
+        rng_valid = np.random.default_rng(valid_seed)
+
+        # splitting off the test indices
+        test_split_perm = rng_test.permutation(self.num_samples)
+        self.test_idx = list(test_split_perm[: self.num_test_samples])
+        self.trainvalid_indices = test_split_perm[self.num_test_samples :]
+
+        # splitting off the validation from the remainder
+        valid_split_perm = rng_valid.permutation(len(self.trainvalid_indices))
+        self.valid_idx = list(
+            self.trainvalid_indices[valid_split_perm[: self.num_valid_samples]]
+        )
+        self.train_idx = list(
+            self.trainvalid_indices[valid_split_perm[self.num_valid_samples :]]
+        )
+
+    def split_index_by_file(self, train_fp, valid_fp, test_fp):
+        train_set = pd.read_csv(train_fp, index_col=0)
+        valid_set = pd.read_csv(valid_fp, index_col=0)
+        test_set = pd.read_csv(test_fp, index_col=0)
+        if not hasattr(self, "response"):  # this is hacky
+            # self.response = pnet_utils.cached_data['response']
+            self.response = pd.DataFrame(
+                {"response": self.data.y}, index=self.data.subject_id
+            )
+        self.train_idx = [
+            self.response.index.get_loc(x)
+            for x in train_set.id
+            if x in self.response.index
+        ]
+        self.valid_idx = [
+            self.response.index.get_loc(x)
+            for x in valid_set.id
+            if x in self.response.index
+        ]
+        self.test_idx = [
+            self.response.index.get_loc(x)
+            for x in test_set.id
+            if x in self.response.index
+        ]
+        # check no redundency
+        assert len(self.train_idx) == len(set(self.train_idx))
+        assert len(self.valid_idx) == len(set(self.valid_idx))
+        assert len(self.test_idx) == len(set(self.test_idx))
+        # check no overlap
+        assert len(set(self.train_idx).intersection(set(self.valid_idx))) == 0
+        assert len(set(self.train_idx).intersection(set(self.test_idx))) == 0
+        assert len(set(self.valid_idx).intersection(set(self.test_idx))) == 0
+
+    def __repr__(self):
+        return (
+            f"PnetDataset("
+            f"len={len(self)}, "
+            f"graph={self.name}, "
+            f"num_edges={self.get(0).edge_index.shape[1]}, "
+            f"edge_tol={self.edge_tol:.2f}"
+            f")"
+        )
+
+    @property
+    def raw_file_names(self):
+        return {
+            # non-tumor-specific data
+            "graph_file": os.path.join(
+                self.root, self._files.get("graph_file", "prostate_gland.gz")
+            ),
+            "selected_genes": os.path.join(
+                self.root,
+                self._files.get(
+                    "selected_genes",
+                    "tcga_prostate_expressed_genes_and_cancer_genes.csv",
+                ),
+            ),
+            "use_coding_genes_only": os.path.join(
+                self.root,
+                self._files.get(
+                    "use_coding_genes_only",
+                    "protein-coding_gene_with_coordinate_minimal.txt",
+                ),
+            ),
+            # tumor data
+            "response": os.path.join(
+                self.root, self._files.get("response", "response_paper.csv")
+            ),
+            "mut_important": os.path.join(
+                self.root,
+                self._files.get(
+                    "mut_important", "P1000_final_analysis_set_cross_important_only.csv"
+                ),
+            ),
+            "cnv_amp": os.path.join(
+                self.root, self._files.get("cnv_amp", "P1000_data_CNA_paper.csv")
+            ),
+            "cnv_del": os.path.join(
+                self.root, self._files.get("cnv_del", "P1000_data_CNA_paper.csv")
+            ),
+        }
+
+    @property
+    def processed_file_names(self):
+        return f"data-{self.name}-{self.edge_tol:.2f}.pt"
+
+    @property
+    def processed_dir(self) -> str:
+        return self.root
+
+
+
 # %%   
 # Run example from their notebook
 import time
@@ -777,14 +999,20 @@ reactome = ReactomeNetwork(reactome_kws)
 
 ## Initalise dataset
 prostate_root = os.path.join("data", "prostate")
+# dataset = GraphDataSet(
+#     root=prostate_root,
+#     name="prostate_graph_humanbase",
+#     edge_tol=0.5, ## Gene connectivity threshold to form an edge connection
+#     pre_transform=T.Compose(
+#         [T.GCNNorm(add_self_loops=False), T.ToSparseTensor(remove_edge_index=False)]
+#     ),
+# )
+
+
 dataset = PnetDataSet(
-    root=prostate_root,
-    name="prostate_graph_humanbase",
-    edge_tol=0.5, ## Gene connectivity threshold to form an edge connection
-    pre_transform=T.Compose(
-        [T.GCNNorm(add_self_loops=False), T.ToSparseTensor(remove_edge_index=False)]
-    ),
+    root=prostate_root
 )
+
 
 # loads the train/valid/test split from pnet
 splits_root = os.path.join(prostate_root, "splits")
@@ -792,4 +1020,15 @@ dataset.split_index_by_file(
     train_fp=os.path.join(splits_root, "training_set_0.csv"),
     valid_fp=os.path.join(splits_root, "validation_set.csv"),
     test_fp=os.path.join(splits_root, "test_set.csv"),
+)
+
+# %%
+## Get Reactome masks
+maps = get_layer_maps(
+    genes=[g for g in dataset.genes],
+    reactome=reactome,
+    n_levels=6, ## Number of P-NET layers to include
+    direction="root_to_leaf",
+    add_unk_genes=False,
+    verbose=False,
 )
