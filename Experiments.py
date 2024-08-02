@@ -130,17 +130,7 @@ print(f"Training took {time.time() - t0:.1f} seconds.")
 fpr_train, tpr_train, train_auc, _, _ = get_metrics(model, train_loader,exp=False)
 fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(model, valid_loader,exp=False)
 
-fig, ax = plt.subplots()
-ax.plot(fpr_train, tpr_train, lw=2, label="train (area = %0.3f)" % train_auc)
-ax.plot(fpr_valid, tpr_valid, lw=2, label="validation (area = %0.3f)" % valid_auc)
-ax.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
-ax.set_xlim([0.0, 1.0])
-ax.set_ylim([0.0, 1.05])
-ax.set_xlabel("False Positive Rate")
-ax.set_ylabel("True Positive Rate")
-ax.set_title("Receiver operating characteristic")
-ax.legend(loc="lower right", frameon=False)
-
+print("validation")
 print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
 print("auc", valid_auc)
 print("aupr", average_precision_score(ys, outs[:, 1]))
@@ -156,9 +146,89 @@ test_loader = DataLoader(
 )
 fpr_test, tpr_test, test_auc, ys, outs = get_metrics(model, test_loader,exp=False)
 
+print("test")
 print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
 print("auc", test_auc)
 print("aupr", average_precision_score(ys, outs[:, 1]))
 print("f1", f1_score(ys, outs[:, 1] > 0.5))
 print("precision", precision_score(ys, outs[:, 1] > 0.5))
 print("recall", recall_score(ys, outs[:, 1] > 0.5))
+
+fig, ax = plt.subplots()
+ax.plot(fpr_train, tpr_train, lw=2, label="train (area = %0.3f)" % train_auc)
+ax.plot(fpr_valid, tpr_valid, lw=2, label="validation (area = %0.3f)" % valid_auc)
+ax.plot(fpr_test, tpr_test, lw=2, label="test (area = %0.3f)" % test_auc)
+ax.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
+ax.set_xlim([0.0, 1.0])
+ax.set_ylim([0.0, 1.05])
+ax.set_xlabel("False Positive Rate")
+ax.set_ylabel("True Positive Rate")
+ax.set_title("Receiver operating characteristic")
+ax.legend(loc="lower right", frameon=False)
+
+
+# %%
+# experiment with random graphs etc. 
+import random
+
+def create_random_graph(original_graph):
+    num_nodes = len(original_graph.nodes)
+    num_edges = len(original_graph.edges)
+
+    # Create an empty graph
+    random_graph = nx.DiGraph()
+
+    # Add nodes
+    random_graph.add_nodes_from(range(num_nodes))
+
+    # Add random edges
+    while len(random_graph.edges) < num_edges:
+        source = random.randint(0, num_nodes - 1)
+        target = random.randint(0, num_nodes - 1)
+        if source != target and not random_graph.has_edge(source, target):
+            random_graph.add_edge(source, target)
+
+    return random_graph
+
+
+def remove_edges_by_pathway(graph, pathway_name):
+    edges_to_remove = [(u, v) for u, v, d in graph.edges(data=True) if pathway_name in d.get('pathway', '')]
+    graph.remove_edges_from(edges_to_remove)
+
+def visualize_graph(graph, title="Graph"):
+    pos = nx.spring_layout(graph)
+    nx.draw(graph, pos, with_labels=True, node_size=50, font_size=8, node_color='skyblue', edge_color='gray')
+    plt.title(title)
+    plt.show()
+
+def visualize_tree(tree, title="Tree"):
+    pos = nx.spring_layout(tree)
+    nx.draw(tree, pos, with_labels=True, node_size=50, font_size=8, node_color='lightgreen', edge_color='gray')
+    plt.title(title)
+    plt.show()
+
+
+# %%
+# Example usage
+random_graph = create_random_graph(reactome.netx)
+visualize_graph(random_graph, title="Random Graph")
+visualize_graph(reactome.netx, title="Reactome Graph")
+
+copy_graph = reactome.netx.copy()
+pathway_name_to_remove = "R-HSA-69306"
+remove_edges_by_pathway(copy_graph, pathway_name_to_remove)
+visualize_graph(copy_graph, title="Reactome Graph")
+
+# %%
+visualize_tree(reactome.get_tree(), title="Reactome Tree")
+
+# %%
+## Get Reactome masks
+random_maps = get_layer_maps(
+    genes=[g for g in dataset.genes],
+    reactome=random_graph,
+    n_levels=6, ## Number of P-NET layers to include
+    direction="root_to_leaf",
+    add_unk_genes=False,
+    verbose=False,
+)
