@@ -118,7 +118,7 @@ trainer = pl.Trainer(
     accelerator="auto",
     max_epochs=n_epochs,
     callbacks=pbar,
-    logger=logger,
+    # logger=logger,
     # deterministic=True,
 )
 trainer.fit(model, train_loader, valid_loader)
@@ -222,13 +222,119 @@ visualize_graph(copy_graph, title="Reactome Graph")
 # %%
 visualize_tree(reactome.get_tree(), title="Reactome Tree")
 
-# %%
-## Get Reactome masks
-random_maps = get_layer_maps(
+# %%import networkx as nx
+import random
+import numpy as np
+
+class Randomized_reactome(ReactomeNetwork):
+    def __init__(self, reactome_kws):
+        super().__init__(reactome_kws)
+        self.netx = self.create_random_graph(self.netx)
+
+    def create_random_graph(self, original_graph):
+        num_nodes = len(original_graph.nodes)
+        num_edges = len(original_graph.edges)
+        random_graph = nx.DiGraph()
+
+        # Map integer node labels to original string labels
+        node_labels = list(original_graph.nodes)
+        random_graph.add_nodes_from(node_labels)
+
+        # Preserve the root node and its connections
+        root_node = "root"
+        root_connections = list(original_graph.successors(root_node))
+        random_graph.add_node(root_node)
+        for target in root_connections:
+            random_graph.add_edge(root_node, target)
+
+        # Add random edges while maintaining a similar degree distribution
+        degree_sequence = [d for n, d in original_graph.degree()]
+        while len(random_graph.edges) < num_edges:
+            source = random.choice(node_labels)
+            target = random.choice(node_labels)
+            if source != target and not random_graph.has_edge(source, target):
+                random_graph.add_edge(source, target)
+
+        return random_graph
+
+
+# Example usage
+reactome_kws = dict(
+    reactome_base_dir=os.path.join("lib", "cancer-net", "data", "reactome"),
+    relations_file_name="ReactomePathwaysRelation.txt",
+    pathway_names_file_name="ReactomePathways.txt",
+    pathway_genes_file_name="ReactomePathways.gmt",
+)
+
+randomized_reactome = Randomized_reactome(reactome_kws)
+
+# Build PNet from the randomized graph
+randomized_maps = get_layer_maps(
     genes=[g for g in dataset.genes],
-    reactome=random_graph,
-    n_levels=6, ## Number of P-NET layers to include
+    reactome=randomized_reactome,
+    n_levels=6,
     direction="root_to_leaf",
     add_unk_genes=False,
     verbose=False,
 )
+
+randomized_model = PNet(
+    layers=randomized_maps,
+    num_genes=randomized_maps[0].shape[0],
+    lr=0.001
+)
+
+# %%
+# Train the randomized model (similar to your existing code)
+print("Train")
+trainer.fit(randomized_model, train_loader, valid_loader)
+
+
+def compare_graph_metrics(original_graph, randomized_graph):
+    metrics = {
+        "Degree Distribution": nx.degree_histogram,
+        "Clustering Coefficient": nx.average_clustering,
+        "Betweenness Centrality": nx.betweenness_centrality,
+    }
+
+    results = {}
+    for metric_name, metric_func in metrics.items():
+        original_metric = metric_func(original_graph)
+        randomized_metric = metric_func(randomized_graph)
+        results[metric_name] = (original_metric, randomized_metric)
+
+    return results
+
+def plot_degree_distribution(original_graph, randomized_graph):
+    original_degrees = nx.degree_histogram(original_graph)
+    randomized_degrees = nx.degree_histogram(randomized_graph)
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(original_degrees, label="Original Graph")
+    plt.plot(randomized_degrees, label="Randomized Graph")
+    plt.xlabel("Degree")
+    plt.ylabel("Frequency")
+    plt.title("Degree Distribution")
+    plt.legend()
+    plt.show()
+
+def calculate_edge_overlap(original_graph, randomized_graph):
+    original_edges = set(original_graph.edges)
+    randomized_edges = set(randomized_graph.edges)
+    overlap = original_edges.intersection(randomized_edges)
+    overlap_ratio = len(overlap) / len(original_edges)
+    return overlap_ratio
+
+# Compare graph metrics
+original_graph = reactome.netx
+
+metrics_comparison = compare_graph_metrics(original_graph, randomized_reactome.netx)
+plot_degree_distribution(original_graph, randomized_reactome.netx)
+
+# Calculate edge overlap
+overlap_ratio = calculate_edge_overlap(original_graph, randomized_reactome.netx)
+print(f"Edge Overlap Ratio: {overlap_ratio:.2f}")
+
+# Visualize graphs
+visualize_graph(original_graph, title="Original Reactome Graph")
+visualize_graph(randomized_reactome.netx, title="Randomized Reactome Graph")
