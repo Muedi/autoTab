@@ -12,16 +12,11 @@ import matplotlib.pyplot as plt
 
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks.progress.progress_bar import ProgressBar
-
 from sklearn.metrics import (
-    roc_auc_score,
-    roc_curve,
-    auc,
     average_precision_score,
     f1_score,
     accuracy_score,
     precision_score,
-
     recall_score,
 )
 
@@ -55,11 +50,9 @@ prostate_root = os.path.join("data", "prostate")
 #     ),
 # )
 
-
 dataset = PnetDataSet(
     root=prostate_root
 )
-
 
 # loads the train/valid/test split from pnet
 splits_root = os.path.join(prostate_root, "splits")
@@ -129,6 +122,7 @@ print(f"Training took {time.time() - t0:.1f} seconds.")
 # %%
 fpr_train, tpr_train, train_auc, _, _ = get_metrics(original_model, train_loader,exp=False)
 fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(original_model, valid_loader,exp=False)
+# save for later
 original_fpr, original_tpr, original_auc, original_ys, original_outs = get_metrics(original_model, valid_loader,exp=False)
 original_accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
 
@@ -168,65 +162,7 @@ ax.set_ylabel("True Positive Rate")
 ax.set_title("Receiver operating characteristic")
 ax.legend(loc="lower right", frameon=False)
 
-
-# %%
-# experiment with random graphs etc. 
-import random
-
-def create_random_graph(original_graph):
-    num_nodes = len(original_graph.nodes)
-    num_edges = len(original_graph.edges)
-
-    # Create an empty graph
-    random_graph = nx.DiGraph()
-
-    # Add nodes
-    random_graph.add_nodes_from(range(num_nodes))
-
-    # Add random edges
-    while len(random_graph.edges) < num_edges:
-        source = random.randint(0, num_nodes - 1)
-        target = random.randint(0, num_nodes - 1)
-        if source != target and not random_graph.has_edge(source, target):
-            random_graph.add_edge(source, target)
-
-    return random_graph
-
-
-def remove_edges_by_pathway(graph, pathway_name):
-    edges_to_remove = [(u, v) for u, v, d in graph.edges(data=True) if pathway_name in d.get('pathway', '')]
-    graph.remove_edges_from(edges_to_remove)
-
-def visualize_graph(graph, title="Graph"):
-    pos = nx.spring_layout(graph)
-    nx.draw(graph, pos, with_labels=True, node_size=50, font_size=8, node_color='skyblue', edge_color='gray')
-    plt.title(title)
-    plt.show()
-
-def visualize_tree(tree, title="Tree"):
-    pos = nx.spring_layout(tree)
-    nx.draw(tree, pos, with_labels=True, node_size=50, font_size=8, node_color='lightgreen', edge_color='gray')
-    plt.title(title)
-    plt.show()
-
-
-# %%
-# Example usage
-# random_graph = create_random_graph(reactome.netx)
-# visualize_graph(random_graph, title="Random Graph")
-# visualize_graph(reactome.netx, title="Reactome Graph")
-
-# copy_graph = reactome.netx.copy()
-# pathway_name_to_remove = "R-HSA-69306"
-# remove_edges_by_pathway(copy_graph, pathway_name_to_remove)
-# visualize_graph(copy_graph, title="Reactome Graph")
-
-# %%
-# visualize_tree(reactome.get_tree(), title="Reactome Tree")
-
 # %%import networkx as nx
-import random
-import numpy as np
 
 class Randomized_reactome(ReactomeNetwork):
     def __init__(self, reactome_kws):
@@ -312,71 +248,8 @@ randomized_model = PNet(
 
 # %%
 
-def compare_graph_metrics(original_graph, randomized_graph):
-    metrics = {
-        "Degree Distribution": nx.degree_histogram,
-        "Clustering Coefficient": nx.average_clustering,
-        "Betweenness Centrality": nx.betweenness_centrality,
-    }
-
-    results = {}
-    for metric_name, metric_func in metrics.items():
-        original_metric = metric_func(original_graph)
-        randomized_metric = metric_func(randomized_graph)
-        results[metric_name] = (original_metric, randomized_metric)
-
-    return results
-
-def plot_degree_distribution(original_graph, randomized_graph):
-    original_degrees = nx.degree_histogram(original_graph)
-    randomized_degrees = nx.degree_histogram(randomized_graph)
-
-    plt.figure(figsize=(10, 5))
-    plt.plot(original_degrees, label="Original Graph")
-    plt.plot(randomized_degrees, label="Randomized Graph")
-    plt.xlabel("Degree")
-    plt.ylabel("Frequency")
-    plt.title("Degree Distribution")
-    plt.legend()
-    plt.show()
-
-def calculate_edge_overlap(original_graph, randomized_graph):
-    original_edges = set(original_graph.edges)
-    randomized_edges = set(randomized_graph.edges)
-    overlap = original_edges.intersection(randomized_edges)
-    overlap_ratio = len(overlap) / len(original_edges)
-    return overlap_ratio
-
-# # Compare graph metrics
-# original_graph = reactome.netx
-
-# metrics_comparison = compare_graph_metrics(original_graph, randomized_reactome.netx)
-# plot_degree_distribution(original_graph, randomized_reactome.netx)
-
-# # Calculate edge overlap
-# overlap_ratio = calculate_edge_overlap(original_graph, randomized_reactome.netx)
-# print(f"Edge Overlap Ratio: {overlap_ratio:.2f}")
-
-# # Visualize graphs
-# visualize_graph(original_graph, title="Original Reactome Graph")
-# visualize_graph(randomized_reactome.netx, title="Randomized Reactome Graph")
 
 # %%
-import os
-import torch
-import torch.nn.functional as F
-import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-from sklearn.metrics import roc_auc_score, roc_curve, auc, accuracy_score
-import matplotlib.pyplot as plt
-
-# Function to evaluate the model
-# Function to evaluate the model using get_metrics
-def evaluate_model(model, data_loader, device):
-    fpr, tpr, auc_value, ys, outs = get_metrics(model, data_loader, seed=1, exp=True, takeLast=False)
-    accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
-    return accuracy, auc_value, fpr, tpr
-
 # Loop to generate and evaluate multiple random graphs
 device = torch.device("cuda")
 num_random_graphs = 5
@@ -412,11 +285,12 @@ for i in range(num_random_graphs):
     trainer.fit(randomized_model, train_loader, valid_loader)
 
     # Evaluate the model
-    accuracy, auc_score, fpr, tpr = evaluate_model(randomized_model, valid_loader, device)
+    fpr, tpr, auc_value, ys, outs = get_metrics(randomized_model, valid_loader, seed=1, exp=True, takeLast=False)
+    accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
     results.append({
         "model": randomized_model,
         "accuracy": accuracy,
-        "auc": auc_score,
+        "auc": auc_value,
         "fpr": fpr,
         "tpr": tpr
     })
