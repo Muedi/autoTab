@@ -4,3 +4,5 @@ lib/
 lightning_logs/
 src/__pycache__/*
 wandb/
+randomized_reactome/
+models/
