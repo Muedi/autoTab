@@ -40,7 +40,7 @@ reactome_kws = dict(
     reactome_base_dir=os.path.join("lib", "cancer-net", "data", "reactome"),
     relations_file_name="ReactomePathwaysRelation.txt",
     pathway_names_file_name="ReactomePathways.txt",
-    pathway_genes_file_name="ReactomePathways.gmt",
+    pathway_genes_file_name="ReactomePathways_human.gmt",
 )
 reactome = ReactomeNetwork(reactome_kws)
 
@@ -103,13 +103,13 @@ valid_loader = DataLoader(
 )
 
 # %%
-model = PNet(
+original_model = PNet(
     layers=maps,
     num_genes=maps[0].shape[0], # 9054
     lr=lr
 )
 
-print("Number of params:",sum(p.numel() for p in model.parameters()))
+print("Number of params:",sum(p.numel() for p in original_model.parameters()))
 logger = WandbLogger()
 pbar = ProgressBar()
 
@@ -121,17 +121,19 @@ trainer = pl.Trainer(
     # logger=logger,
     # deterministic=True,
 )
-trainer.fit(model, train_loader, valid_loader)
+trainer.fit(original_model, train_loader, valid_loader)
 print(f"Training took {time.time() - t0:.1f} seconds.")
 # %%
 
 
 # %%
-fpr_train, tpr_train, train_auc, _, _ = get_metrics(model, train_loader,exp=False)
-fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(model, valid_loader,exp=False)
+fpr_train, tpr_train, train_auc, _, _ = get_metrics(original_model, train_loader,exp=False)
+fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(original_model, valid_loader,exp=False)
+original_fpr, original_tpr, original_auc, original_ys, original_outs = get_metrics(original_model, valid_loader,exp=False)
+original_accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
 
 print("validation")
-print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
+print("accuracy", original_accuracy)
 print("auc", valid_auc)
 print("aupr", average_precision_score(ys, outs[:, 1]))
 print("f1", f1_score(ys, outs[:, 1] > 0.5))
@@ -144,7 +146,7 @@ test_loader = DataLoader(
     sampler=SubsetRandomSampler(dataset.test_idx),
     drop_last=True,
 )
-fpr_test, tpr_test, test_auc, ys, outs = get_metrics(model, test_loader,exp=False)
+fpr_test, tpr_test, test_auc, ys, outs = get_metrics(original_model, test_loader,exp=False)
 
 print("test")
 print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
@@ -210,17 +212,17 @@ def visualize_tree(tree, title="Tree"):
 
 # %%
 # Example usage
-random_graph = create_random_graph(reactome.netx)
-visualize_graph(random_graph, title="Random Graph")
-visualize_graph(reactome.netx, title="Reactome Graph")
+# random_graph = create_random_graph(reactome.netx)
+# visualize_graph(random_graph, title="Random Graph")
+# visualize_graph(reactome.netx, title="Reactome Graph")
 
-copy_graph = reactome.netx.copy()
-pathway_name_to_remove = "R-HSA-69306"
-remove_edges_by_pathway(copy_graph, pathway_name_to_remove)
-visualize_graph(copy_graph, title="Reactome Graph")
+# copy_graph = reactome.netx.copy()
+# pathway_name_to_remove = "R-HSA-69306"
+# remove_edges_by_pathway(copy_graph, pathway_name_to_remove)
+# visualize_graph(copy_graph, title="Reactome Graph")
 
 # %%
-visualize_tree(reactome.get_tree(), title="Reactome Tree")
+# visualize_tree(reactome.get_tree(), title="Reactome Tree")
 
 # %%import networkx as nx
 import random
@@ -249,21 +251,40 @@ class Randomized_reactome(ReactomeNetwork):
 
         # Add random edges while maintaining a similar degree distribution
         degree_sequence = [d for n, d in original_graph.degree()]
+        stubs = []
+        for node, degree in original_graph.degree():
+            stubs.extend([node] * degree)
+
+        random.shuffle(stubs)
+        while stubs:
+            source = stubs.pop()
+            target = stubs.pop()
+            if source != target and not random_graph.has_edge(source, target):
+                random_graph.add_edge(source, target)
+
+        # Ensure the random graph has the same number of edges as the original graph
         while len(random_graph.edges) < num_edges:
             source = random.choice(node_labels)
             target = random.choice(node_labels)
             if source != target and not random_graph.has_edge(source, target):
                 random_graph.add_edge(source, target)
 
-        return random_graph
+        # Preserve the hierarchical structure
+        layers = get_layers_from_net(original_graph, n_levels=6)
+        for layer in layers:
+            for pathway, genes in layer.items():
+                for gene in genes:
+                    if not random_graph.has_edge(pathway, gene):
+                        random_graph.add_edge(pathway, gene)
 
+        return random_graph
 
 # Example usage
 reactome_kws = dict(
     reactome_base_dir=os.path.join("lib", "cancer-net", "data", "reactome"),
     relations_file_name="ReactomePathwaysRelation.txt",
     pathway_names_file_name="ReactomePathways.txt",
-    pathway_genes_file_name="ReactomePathways.gmt",
+    pathway_genes_file_name="ReactomePathways_human.gmt",
 )
 
 randomized_reactome = Randomized_reactome(reactome_kws)
@@ -284,11 +305,12 @@ randomized_model = PNet(
     lr=0.001
 )
 
-# %%
-# Train the randomized model (similar to your existing code)
-print("Train")
-trainer.fit(randomized_model, train_loader, valid_loader)
 
+# Train the randomized model (similar to your existing code)
+# print("Train")
+# trainer.fit(randomized_model, train_loader, valid_loader)
+
+# %%
 
 def compare_graph_metrics(original_graph, randomized_graph):
     metrics = {
@@ -325,16 +347,99 @@ def calculate_edge_overlap(original_graph, randomized_graph):
     overlap_ratio = len(overlap) / len(original_edges)
     return overlap_ratio
 
-# Compare graph metrics
-original_graph = reactome.netx
+# # Compare graph metrics
+# original_graph = reactome.netx
 
-metrics_comparison = compare_graph_metrics(original_graph, randomized_reactome.netx)
-plot_degree_distribution(original_graph, randomized_reactome.netx)
+# metrics_comparison = compare_graph_metrics(original_graph, randomized_reactome.netx)
+# plot_degree_distribution(original_graph, randomized_reactome.netx)
 
-# Calculate edge overlap
-overlap_ratio = calculate_edge_overlap(original_graph, randomized_reactome.netx)
-print(f"Edge Overlap Ratio: {overlap_ratio:.2f}")
+# # Calculate edge overlap
+# overlap_ratio = calculate_edge_overlap(original_graph, randomized_reactome.netx)
+# print(f"Edge Overlap Ratio: {overlap_ratio:.2f}")
 
-# Visualize graphs
-visualize_graph(original_graph, title="Original Reactome Graph")
-visualize_graph(randomized_reactome.netx, title="Randomized Reactome Graph")
+# # Visualize graphs
+# visualize_graph(original_graph, title="Original Reactome Graph")
+# visualize_graph(randomized_reactome.netx, title="Randomized Reactome Graph")
+
+# %%
+import os
+import torch
+import torch.nn.functional as F
+import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
+from sklearn.metrics import roc_auc_score, roc_curve, auc, accuracy_score
+import matplotlib.pyplot as plt
+
+# Function to evaluate the model
+# Function to evaluate the model using get_metrics
+def evaluate_model(model, data_loader, device):
+    fpr, tpr, auc_value, ys, outs = get_metrics(model, data_loader, seed=1, exp=True, takeLast=False)
+    accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
+    return accuracy, auc_value, fpr, tpr
+
+# Loop to generate and evaluate multiple random graphs
+device = torch.device("cuda")
+num_random_graphs = 5
+n_epochs = 10
+results = []
+
+for i in range(num_random_graphs):
+    print(f"Generating random graph {i+1}/{num_random_graphs}")
+    randomized_reactome = Randomized_reactome(reactome_kws)
+
+    # Build PNet from the randomized graph
+    randomized_maps = get_layer_maps(
+        genes=[g for g in dataset.genes],
+        reactome=randomized_reactome,
+        n_levels=6,
+        direction="root_to_leaf",
+        add_unk_genes=False,
+        verbose=False,
+    )
+
+    randomized_model = PNet(
+        layers=randomized_maps,
+        num_genes=randomized_maps[0].shape[0],
+        lr=0.001
+    )
+
+    # Train the randomized model
+    trainer = pl.Trainer(
+        accelerator="auto",
+        max_epochs=n_epochs,
+        logger=WandbLogger(project="randomized_reactome"),
+    )
+    trainer.fit(randomized_model, train_loader, valid_loader)
+
+    # Evaluate the model
+    accuracy, auc_score, fpr, tpr = evaluate_model(randomized_model, valid_loader, device)
+    results.append({
+        "model": randomized_model,
+        "accuracy": accuracy,
+        "auc": auc_score,
+        "fpr": fpr,
+        "tpr": tpr
+    })
+
+    # Save the model
+    model_path = f"models/randomized_model_{i+1}.pth"
+    torch.save(randomized_model.state_dict(), model_path)
+    print(f"Model {i+1} saved to {model_path}")
+
+# Plot AUC curves
+plt.figure()
+# plot orig
+plt.plot(original_fpr, original_tpr, label=f"Original Model (AUC = {original_auc:.2f})")
+# plot all randoms 
+for i, result in enumerate(results):
+    plt.plot(result["fpr"], result["tpr"], label=f"Model {i+1} (AUC = {result['auc']:.2f})")
+plt.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("Receiver Operating Characteristic (ROC) Curve")
+plt.legend(loc="lower right")
+plt.show()
+
+# Print results
+for i, result in enumerate(results):
+    print(f"Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}")

@@ -355,3 +355,4 @@ def get_layers_from_net(net: nx.Graph, n_levels: int) -> List[Dict[str, List[str
         layers.append(dict)
 
     return layers
+
