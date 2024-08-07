@@ -33,12 +33,24 @@ print("Number of leaf nodes:", num_leaf_nodes)
 # %%
 # Visualize the graph
 plt.figure(figsize=(10, 8))
-pos = nx.spring_layout(G, seed=42)
-nx.draw_networkx_nodes(G, pos, node_size=500, node_color='lightblue')
-nx.draw_networkx_edges(G, pos, edge_color='gray', arrowsize=10)
-nx.draw_networkx_labels(G, pos, font_size=8)
+# Select a subset of 20 root nodes and their children
+subset_root_nodes = root_nodes[:10]
+subset_child_nodes = [child for node in subset_root_nodes for child in G.successors(node)]
+subset_nodes = subset_root_nodes + subset_child_nodes
+subset_edges = [(parent, child) for parent in subset_root_nodes for child in G.successors(parent)]
+# Draw the subset of nodes and edges
+G2 = G.subgraph(subset_nodes)
+#pos = nx.spring_layout(G2, seed=42)
+# Create a bipartite layout for root nodes vs others
+pos = nx.shell_layout(G2, nlist=[subset_root_nodes, subset_child_nodes])
+
+# Color the root nodes differently
+node_colors = ['red' if node in subset_root_nodes else 'blue' for node in G2.nodes()]
+
+nx.draw_networkx_nodes(G2, pos, node_size=500, node_color=node_colors)
+nx.draw_networkx_edges(G2, pos, edge_color='red', arrowsize=10)
+nx.draw_networkx_labels(G2, pos, font_size=8)
+
 plt.title('Reactome Pathway Relations')
 plt.axis('off')
-plt.show()
-
 # %%
