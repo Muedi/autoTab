@@ -10,7 +10,7 @@ from torch_geometric.loader import DataLoader
 import pytorch_lightning as pl
 import matplotlib.pyplot as plt
 
-from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.callbacks.progress.progress_bar import ProgressBar
 from sklearn.metrics import (
     average_precision_score,
@@ -22,7 +22,8 @@ from sklearn.metrics import (
 
 from src import *
 
-
+# from torch.utils.tensorboard import SummaryWriter
+# writer = SummaryWriter()
 
 # from cancernet.arch import PNet
 # from cancernet.util import ProgressBar, InMemoryLogger, get_roc
@@ -103,7 +104,8 @@ original_model = PNet(
 )
 
 print("Number of params:",sum(p.numel() for p in original_model.parameters()))
-logger = WandbLogger()
+# logger = WandbLogger()
+logger = TensorBoardLogger(save_dir="tensorboard_log/")
 pbar = ProgressBar()
 
 t0 = time.time()
@@ -111,13 +113,11 @@ trainer = pl.Trainer(
     accelerator="auto",
     max_epochs=n_epochs,
     callbacks=pbar,
-    # logger=logger,
+    logger=logger,
     # deterministic=True,
 )
 trainer.fit(original_model, train_loader, valid_loader)
 print(f"Training took {time.time() - t0:.1f} seconds.")
-# %%
-
 
 # %%
 fpr_train, tpr_train, train_auc, _, _ = get_metrics(original_model, train_loader,exp=False)
@@ -167,54 +167,65 @@ ax.legend(loc="lower right", frameon=False)
 class Randomized_reactome(ReactomeNetwork):
     def __init__(self, reactome_kws):
         super().__init__(reactome_kws)
-        self.netx = self.create_random_graph(self.netx)
+        self.netx = self.randomize_edges_by_layer(self.netx)
 
-    def create_random_graph(self, original_graph):
-        num_nodes = len(original_graph.nodes)
-        num_edges = len(original_graph.edges)
+    def randomize_edges_by_layer(self, original_graph: nx.DiGraph) -> nx.DiGraph:
+        """Randomize the order of edges between nodes by layer while ensuring the graph remains connected."""
+        # Get the layers of the original graph
+        layers = self.get_layers(n_levels=6, direction="root_to_leaf")
+
+        # Create a new graph with the same nodes
         random_graph = nx.DiGraph()
+        random_graph.add_nodes_from(original_graph.nodes)
 
-        # Map integer node labels to original string labels
-        node_labels = list(original_graph.nodes)
-        random_graph.add_nodes_from(node_labels)
-
-        # Preserve the root node and its connections
-        root_node = "root"
-        root_connections = list(original_graph.successors(root_node))
-        random_graph.add_node(root_node)
-        for target in root_connections:
-            random_graph.add_edge(root_node, target)
-
-        # Add random edges while maintaining a similar degree distribution
-        degree_sequence = [d for n, d in original_graph.degree()]
-        stubs = []
-        for node, degree in original_graph.degree():
-            stubs.extend([node] * degree)
-
-        random.shuffle(stubs)
-        while stubs:
-            source = stubs.pop()
-            target = stubs.pop()
-            if source != target and not random_graph.has_edge(source, target):
-                random_graph.add_edge(source, target)
-
-        # Ensure the random graph has the same number of edges as the original graph
-        while len(random_graph.edges) < num_edges:
-            source = random.choice(node_labels)
-            target = random.choice(node_labels)
-            if source != target and not random_graph.has_edge(source, target):
-                random_graph.add_edge(source, target)
-
-        # Preserve the hierarchical structure
-        layers = get_layers_from_net(original_graph, n_levels=6)
+        # Randomize edges within each layer
         for layer in layers:
+            pathway_nodes = []
+            gene_nodes = []
             for pathway, genes in layer.items():
                 for gene in genes:
-                    if not random_graph.has_edge(pathway, gene):
-                        random_graph.add_edge(pathway, gene)
+                    if original_graph.has_edge(pathway, gene):
+                        pathway_nodes.append(pathway)
+                        gene_nodes.append(gene)
+            random.shuffle(gene_nodes)
+            for source, target in zip(pathway_nodes, gene_nodes):
+                random_graph.add_edge(source, target)
+
+        # Ensure the graph is connected
+        random_graph = complete_network(random_graph, n_levels=6)
 
         return random_graph
+    def get_layers(self, n_levels: int, direction: str = "root_to_leaf") -> List[Dict[str, List[str]]]:
+        """Generate layers of nodes from root to leaves or vice versa.
 
+        Depending on the direction specified, this function returns the layers of the network.
+        """
+        if direction == "root_to_leaf":
+            net = self.get_completed_network(n_levels)
+            layers = get_layers_from_net(net, n_levels)
+        else:
+            net = self.get_completed_network(5)
+            layers = get_layers_from_net(net, 5)
+            layers = layers[5 - n_levels : 5]
+
+        # Get the last layer (genes level)
+        terminal_nodes = [
+            n for n, d in net.out_degree() if d == 0
+        ]  # Set of terminal pathways
+        # Find genes belonging to these pathways
+        genes_df = self.reactome.pathway_genes
+
+        dict = {}
+        missing_pathways = []
+        for p in terminal_nodes:
+            pathway_name = re.sub("_copy.*", "", p)
+            genes = genes_df[genes_df["group"] == pathway_name]["gene"].unique()
+            if len(genes) == 0:
+                missing_pathways.append(pathway_name)
+            dict[pathway_name] = genes
+
+        layers.append(dict)
+        return layers
 # Example usage
 reactome_kws = dict(
     reactome_base_dir=os.path.join("lib", "cancer-net", "data", "reactome"),
@@ -223,23 +234,23 @@ reactome_kws = dict(
     pathway_genes_file_name="ReactomePathways_human.gmt",
 )
 
-randomized_reactome = Randomized_reactome(reactome_kws)
+# randomized_reactome = Randomized_reactome(reactome_kws)
 
-# Build PNet from the randomized graph
-randomized_maps = get_layer_maps(
-    genes=[g for g in dataset.genes],
-    reactome=randomized_reactome,
-    n_levels=6,
-    direction="root_to_leaf",
-    add_unk_genes=False,
-    verbose=False,
-)
+# # Build PNet from the randomized graph
+# randomized_maps = get_layer_maps(
+#     genes=[g for g in dataset.genes],
+#     reactome=randomized_reactome,
+#     n_levels=6,
+#     direction="root_to_leaf",
+#     add_unk_genes=False,
+#     verbose=False,
+# )
 
-randomized_model = PNet(
-    layers=randomized_maps,
-    num_genes=randomized_maps[0].shape[0],
-    lr=0.001
-)
+# randomized_model = PNet(
+#     layers=randomized_maps,
+#     num_genes=randomized_maps[0].shape[0],
+#     lr=0.001
+# )
 
 
 # Train the randomized model (similar to your existing code)
@@ -247,13 +258,10 @@ randomized_model = PNet(
 # trainer.fit(randomized_model, train_loader, valid_loader)
 
 # %%
-
-
-# %%
 # Loop to generate and evaluate multiple random graphs
 device = torch.device("cuda")
-num_random_graphs = 5
-n_epochs = 10
+num_random_graphs = 1
+n_epochs = 100
 results = []
 
 for i in range(num_random_graphs):
@@ -280,7 +288,8 @@ for i in range(num_random_graphs):
     trainer = pl.Trainer(
         accelerator="auto",
         max_epochs=n_epochs,
-        logger=WandbLogger(project="randomized_reactome"),
+        # logger=WandbLogger(project="randomized_reactome"),
+        logger=logger
     )
     trainer.fit(randomized_model, train_loader, valid_loader)
 
