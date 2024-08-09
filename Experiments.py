@@ -41,7 +41,7 @@ reactome_kws = dict(
 reactome = ReactomeNetwork(reactome_kws)
 
 ## Initalise dataset
-prostate_root = os.path.join("data", "prostate")
+prostate_root = os.path.join("lib", "cancer-net", "data", "prostate")
 # dataset = GraphDataSet(
 #     root=prostate_root,
 #     name="prostate_graph_humanbase",

@@ -1,0 +1,25 @@
+[tool.poetry]
+name = "autotab"
+version = "0.1.0"
+description = "AutoML Experiments for Tabular Data"
+authors = ["Maximilian Sprang", "David Selby"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+torch = "^2.4.0"
+scikit-learn = "^1.5.1"
+torch-geometric = "^2.5.3"
+pytorch-lightning = "^2.3.3"
+matplotlib = "^3.9.0"
+pandas = "^2.2.2"
+wandb = "^0.17.5"
+
+
+[tool.poetry.group.dev.dependencies]
+ipykernel = "^6.29.5"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
