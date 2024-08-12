@@ -10,7 +10,7 @@ import networkx as nx
 # This includes which pathways are parents of which other pathways, in format parent -> child.
 # However it does not specify anything about genes specifically;
 # that is information found instead in the gmt files with pathway definitions.
-data_dir = pathlib.Path('../lib/cancer-net/data/reactome')
+data_dir = pathlib.Path('./lib/cancer-net/data/reactome')
 reactome_file = data_dir / 'ReactomePathwaysRelation.txt'
 pathway_rels = pd.read_csv(reactome_file, header=None, sep='\t', names=['Parent', 'Child'])
 

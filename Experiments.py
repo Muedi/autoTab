@@ -195,6 +195,7 @@ class Randomized_reactome(ReactomeNetwork):
         random_graph = complete_network(random_graph, n_levels=6)
 
         return random_graph
+
     def get_layers(self, n_levels: int, direction: str = "root_to_leaf") -> List[Dict[str, List[str]]]:
         """Generate layers of nodes from root to leaves or vice versa.
 
@@ -260,7 +261,7 @@ reactome_kws = dict(
 # %%
 # Loop to generate and evaluate multiple random graphs
 device = torch.device("cuda")
-num_random_graphs = 1
+num_random_graphs = 5
 n_epochs = 100
 results = []
 
@@ -294,14 +295,16 @@ for i in range(num_random_graphs):
     trainer.fit(randomized_model, train_loader, valid_loader)
 
     # Evaluate the model
-    fpr, tpr, auc_value, ys, outs = get_metrics(randomized_model, valid_loader, seed=1, exp=True, takeLast=False)
+    fpr, tpr, auc_value, ys, outs = get_metrics(randomized_model, valid_loader, seed=1, exp=False, takeLast=False)
     accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
     results.append({
         "model": randomized_model,
         "accuracy": accuracy,
         "auc": auc_value,
         "fpr": fpr,
-        "tpr": tpr
+        "tpr": tpr,
+        "precision": precision_score(ys, outs[:, 1] > 0.5),
+        "recall": recall_score(ys, outs[:, 1] > 0.5)
     })
 
     # Save the model
@@ -316,6 +319,7 @@ plt.plot(original_fpr, original_tpr, label=f"Original Model (AUC = {original_auc
 # plot all randoms 
 for i, result in enumerate(results):
     plt.plot(result["fpr"], result["tpr"], label=f"Model {i+1} (AUC = {result['auc']:.2f})")
+
 plt.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
 plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
@@ -323,6 +327,15 @@ plt.title("Receiver Operating Characteristic (ROC) Curve")
 plt.legend(loc="lower right")
 plt.show()
 
+# %%
 # Print results
 for i, result in enumerate(results):
-    print(f"Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}")
+    print(f"Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}, precision = {result['precision']:.2f}, recall = {result['recall']:.2f}")
+
+
+# TODO:
+# - build "more random" network
+# - Fully connected NN, regularize weights l1
+# - Fully connected NN, regularize nodes? l1 ?
+# - Fully connected NN, gets smaller to the end, regularize weights l1
+# 
