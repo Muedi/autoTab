@@ -54,7 +54,10 @@ def get_metrics(
                 tb=x
             
             output = model(tb)
-    
+            # Print model outputs for debugging
+            print("Model output:")
+            print(output)
+            
             # handle multiple outputs
             if not torch.is_tensor(output):
                 assert hasattr(output, "__getitem__")

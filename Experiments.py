@@ -76,9 +76,9 @@ maps = get_layer_maps(
 
 # %%
 # Set random seed
-pl.seed_everything(42, workers=True)
+pl.seed_everything(0, workers=True)
 
-n_epochs = 100
+n_epochs = 10
 batch_size = 10
 lr = 0.001
 
@@ -261,7 +261,7 @@ reactome_kws = dict(
 # %%
 # Loop to generate and evaluate multiple random graphs
 device = torch.device("cuda")
-num_random_graphs = 5
+num_random_graphs = 1
 n_epochs = 100
 results = []
 
@@ -339,3 +339,150 @@ for i, result in enumerate(results):
 # - Fully connected NN, regularize nodes? l1 ?
 # - Fully connected NN, gets smaller to the end, regularize weights l1
 # 
+# %% actual random network 
+# 6 layers all equally large
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import pytorch_lightning as pl
+
+class SparseNN(pl.LightningModule):
+    def __init__(self, num_genes, num_features, hidden_size, output_size, lr=0.001, l1_lambda=0.01):
+        super(SparseNN, self).__init__()
+        self.lr = lr
+        self.l1_lambda = l1_lambda
+
+        self.feature_layer = FeatureLayer(num_genes, num_features)
+
+        self.layers = nn.ModuleList([
+            nn.Linear(num_genes, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_size, output_size)
+        ])
+
+        self.activation = nn.ReLU()
+        self.output_activation = nn.Sigmoid()
+
+    def forward(self, x):
+        x = self.feature_layer(x)
+        for layer in self.layers[:-1]:
+            x = self.activation(layer(x))
+        x = self.output_activation(self.layers[-1](x))
+        return x
+
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=self.lr)
+        return optimizer
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y)
+
+        # L1 regularization
+        l1_norm = sum(p.abs().sum() for p in self.parameters())
+        loss = loss + self.l1_lambda * l1_norm
+
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y)
+
+        # L1 regularization
+        l1_norm = sum(p.abs().sum() for p in self.parameters())
+        loss = loss + self.l1_lambda * l1_norm
+
+        self.log('val_loss', loss)
+        return loss
+
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y)
+
+        # L1 regularization
+        l1_norm = sum(p.abs().sum() for p in self.parameters())
+        loss = loss + self.l1_lambda * l1_norm
+
+        self.log('test_loss', loss)
+        return loss
+
+# Example usage
+num_genes = maps[0].shape[0]  # Example number of genes
+num_features = 3  # Example number of features per gene
+hidden_size = 128  # Example hidden layer size
+output_size = 1  # Example output size
+
+# sparse_model = SparseNN(num_genes=num_genes, num_features=num_features, hidden_size=hidden_size, output_size=output_size, lr=0.001, l1_lambda=0.01)
+
+# trainer = pl.Trainer(max_epochs=100)
+# trainer.fit(sparse_model, train_loader, valid_loader)
+# trainer.test(sparse_model, test_loader)
+
+# %%
+device = torch.device("cuda")
+num_sparse_models = 1
+n_epochs = 10
+results = []
+
+for i in range(num_sparse_models):
+    print(f"Running random model {i+1}/{num_sparse_models}")
+
+    sparse_model = SparseNN(num_genes=num_genes, num_features=num_features, hidden_size=hidden_size, output_size=output_size, lr=0.001, l1_lambda=0.01)
+
+    # Train the randomized model
+    trainer = pl.Trainer(
+        accelerator="auto",
+        max_epochs=n_epochs,
+        # logger=WandbLogger(project="randomized_reactome"),
+        logger=logger
+    )
+    trainer.fit(sparse_model, train_loader, valid_loader)
+
+    # Evaluate the model
+    fpr, tpr, auc_value, ys, outs = get_metrics(sparse_model, valid_loader, seed=1, exp=False, takeLast=False)
+    accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
+    results.append({
+        "model": sparse_model,
+        "accuracy": accuracy,
+        "auc": auc_value,
+        "fpr": fpr,
+        "tpr": tpr,
+        "precision": precision_score(ys, outs[:, 1] > 0.5),
+        "recall": recall_score(ys, outs[:, 1] > 0.5)
+    })
+
+    # Save the model
+    model_path = f"models/sparse_model_{i+1}.pth"
+    torch.save(randomized_model.state_dict(), model_path)
+    print(f"Model {i+1} saved to {model_path}")
+
+# Plot AUC curves
+plt.figure()
+# plot orig
+plt.plot(original_fpr, original_tpr, label=f"Original Model (AUC = {original_auc:.2f})")
+# plot all randoms 
+for i, result in enumerate(results):
+    plt.plot(result["fpr"], result["tpr"], label=f"Model {i+1} (AUC = {result['auc']:.2f})")
+
+plt.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.title("Receiver Operating Characteristic (ROC) Curve")
+plt.legend(loc="lower right")
+plt.show()
+
+# %%
+# Print results
+for i, result in enumerate(results):
+    print(f"Sparse Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}, precision = {result['precision']:.2f}, recall = {result['recall']:.2f}")
+
+# %%
