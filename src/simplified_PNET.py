@@ -304,7 +304,7 @@ class PNet(BaseNet):
         # run the model and calculate loss
         x,y_true=batch
         y_hat = self(x)
-
+        # print(y_hat)
         loss = 0
         if self.class_weights:
             weights=y_true*0.75+0.75

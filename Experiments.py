@@ -344,6 +344,7 @@ for i, result in enumerate(results):
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torchmetrics
 import torch.nn.functional as F
 import pytorch_lightning as pl
 
@@ -366,14 +367,16 @@ class SparseNN(pl.LightningModule):
         ])
 
         self.activation = nn.ReLU()
-        self.output_activation = nn.Sigmoid()
+
+        # Define accuracy metric
+        self.accuracy = torchmetrics.Accuracy(task="binary")
 
     def forward(self, x):
         x = self.feature_layer(x)
         for layer in self.layers[:-1]:
             x = self.activation(layer(x))
-        x = self.output_activation(self.layers[-1](x))
-        return x
+        logits = self.layers[-1](x)
+        return logits
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr=self.lr)
@@ -381,37 +384,54 @@ class SparseNN(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self(x)
-        loss = F.binary_cross_entropy(y_hat, y)
+        logits = self(x)
+        print(logits)
+        loss = F.binary_cross_entropy_with_logits(logits, y)
 
         # L1 regularization
         l1_norm = sum(p.abs().sum() for p in self.parameters())
         loss = loss + self.l1_lambda * l1_norm
 
+        # Calculate and log accuracy
+        preds = torch.round(torch.sigmoid(logits))
+        acc = self.accuracy(preds, y)
+        self.log('train_acc', acc, prog_bar=True)
+        
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self(x)
-        loss = F.binary_cross_entropy(y_hat, y)
+        logits = self(x)
+        print(logits)
+        loss = F.binary_cross_entropy_with_logits(logits, y)
 
         # L1 regularization
         l1_norm = sum(p.abs().sum() for p in self.parameters())
         loss = loss + self.l1_lambda * l1_norm
 
+        # Calculate and log accuracy
+        preds = torch.round(torch.sigmoid(logits))
+        acc = self.accuracy(preds, y)
+        self.log('val_acc', acc, prog_bar=True)
+        
         self.log('val_loss', loss)
         return loss
 
     def test_step(self, batch, batch_idx):
         x, y = batch
-        y_hat = self(x)
-        loss = F.binary_cross_entropy(y_hat, y)
+        logits = self(x)
+        loss = F.binary_cross_entropy_with_logits(logits, y)
 
         # L1 regularization
         l1_norm = sum(p.abs().sum() for p in self.parameters())
         loss = loss + self.l1_lambda * l1_norm
 
+        # Calculate and log accuracy
+        preds = torch.round(torch.sigmoid(logits))
+        acc = self.accuracy(preds, y)
+        self.log('test_acc', acc, prog_bar=True)
+        
         self.log('test_loss', loss)
         return loss
 
@@ -427,6 +447,65 @@ output_size = 1  # Example output size
 # trainer.fit(sparse_model, train_loader, valid_loader)
 # trainer.test(sparse_model, test_loader)
 
+
+class FullyConnectedNet(BaseNet):
+    """A fully connected neural network with 6 layers, including the FeatureLayer."""
+
+    def __init__(
+        self,
+        num_genes: int,
+        num_features: int = 3,
+        lr: float = 0.001,
+        scheduler: str="lambda"
+    ):
+        """Initialize.
+        :param num_genes: number of genes in dataset
+        :param num_features: number of features for each gene
+        :param lr: learning rate
+        """
+        super().__init__(lr=lr, scheduler=scheduler)
+        self.num_genes = num_genes
+        self.num_features = num_features
+
+        self.network = nn.Sequential(
+            FeatureLayer(self.num_genes, self.num_features),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        """ Forward pass through the fully connected network. """
+        return self.network(x)
+
+    def step(self, batch, kind: str) -> dict:
+        """Step function executed by lightning trainer module."""
+        # run the model and calculate loss
+        x, y_true = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y_true)
+
+        # assess accuracy
+        correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
+        total = len(y_true)
+        batch_dict = {
+            "loss": loss,
+            # correct and total will be used at epoch end
+            "correct": correct,
+            "total": total,
+        }
+        return batch_dict
+
 # %%
 device = torch.device("cuda")
 num_sparse_models = 1
@@ -434,9 +513,9 @@ n_epochs = 10
 results = []
 
 for i in range(num_sparse_models):
-    print(f"Running random model {i+1}/{num_sparse_models}")
+    print(f"Running full model {i+1}/{num_sparse_models}")
 
-    sparse_model = SparseNN(num_genes=num_genes, num_features=num_features, hidden_size=hidden_size, output_size=output_size, lr=0.001, l1_lambda=0.01)
+    full_model = FullyConnectedNet(num_genes=num_genes, num_features=num_features)
 
     # Train the randomized model
     trainer = pl.Trainer(
@@ -445,13 +524,13 @@ for i in range(num_sparse_models):
         # logger=WandbLogger(project="randomized_reactome"),
         logger=logger
     )
-    trainer.fit(sparse_model, train_loader, valid_loader)
+    trainer.fit(full_model, train_loader, valid_loader)
 
     # Evaluate the model
-    fpr, tpr, auc_value, ys, outs = get_metrics(sparse_model, valid_loader, seed=1, exp=False, takeLast=False)
+    fpr, tpr, auc_value, ys, outs = get_metrics(full_model, valid_loader, seed=1, exp=False, takeLast=False)
     accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
     results.append({
-        "model": sparse_model,
+        "model": full_model,
         "accuracy": accuracy,
         "auc": auc_value,
         "fpr": fpr,
@@ -461,8 +540,8 @@ for i in range(num_sparse_models):
     })
 
     # Save the model
-    model_path = f"models/sparse_model_{i+1}.pth"
-    torch.save(randomized_model.state_dict(), model_path)
+    model_path = f"models/full_model_{i+1}.pth"
+    torch.save(full_model.state_dict(), model_path)
     print(f"Model {i+1} saved to {model_path}")
 
 # Plot AUC curves
@@ -486,3 +565,145 @@ for i, result in enumerate(results):
     print(f"Sparse Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}, precision = {result['precision']:.2f}, recall = {result['recall']:.2f}")
 
 # %%
+
+# import torch.nn as nn
+# import torch.optim as optim
+
+# class FullyConnectedNet(pl.LightningModule):
+#     def __init__(self, num_genes, num_features, n_layers=6, lr=0.001, l1_lambda=0.01):
+#         super(FullyConnectedNet, self).__init__()
+#         layers = []
+#         current_size = num_genes
+#         for i in range(n_layers):
+#             next_size = max(num_genes // (2 ** i), 1)  # Gradually decrease the size of the layers
+#             layers.append(nn.Linear(current_size, next_size))
+#             layers.append(nn.ReLU())
+#             current_size = next_size
+
+#         self.feature_layer = FeatureLayer(num_genes, num_features)
+#         self.network = nn.Sequential(*layers)
+#         self.output_layer = nn.Linear(current_size, 1)  # Assuming binary classification
+#         self.lr = lr
+#         self.l1_lambda = l1_lambda
+
+#     def forward(self, x):
+#         x = self.feature_layer(x)
+#         x = self.network(x)
+#         x = self.output_layer(x)
+#         return x
+
+#     def configure_optimizers(self):
+#         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
+#         return optimizer
+
+#     def l1_regularization_loss(self):
+#         l1_loss = 0
+#         for param in self.parameters():
+#             l1_loss += torch.norm(param, 1)
+#         return self.l1_lambda * l1_loss
+
+#     def training_step(self, batch, batch_idx):
+#         x, y = batch
+#         outputs = self.forward(x)
+#         print(outputs)
+#         loss = F.binary_cross_entropy(outputs, y)
+
+#         # L1 regularization
+#         l1_loss = self.l1_regularization_loss()
+#         total_loss = loss + l1_loss
+
+#         self.log('train_loss', total_loss)
+#         return total_loss
+
+#     def validation_step(self, batch, batch_idx):
+#         x, y = batch
+#         outputs = self.forward(x)
+#         print(outputs)
+#         loss = F.binary_cross_entropy(outputs, y)
+#         self.log('val_loss', loss)
+#         return loss
+
+# # Define model parameters
+# lr = 0.001
+# l1_lambda = 0.01
+
+# # Initialize the model
+# fc_model = FullyConnectedNet(num_genes=num_genes, num_features=num_features, n_layers=6, lr=lr, l1_lambda=l1_lambda)
+
+# # # Wrap the model with a Lightning module
+# # fc_trainer_model = FullyConnectedNet(model=fc_model, lr=lr, l1_lambda=l1_lambda)
+
+# # Train the model
+# trainer = pl.Trainer(
+#     accelerator="auto",
+#     max_epochs=n_epochs,
+#     logger=logger
+# )
+# trainer.fit(fc_model, train_loader, valid_loader)
+
+# # Evaluate the model
+# fpr, tpr, auc_value, ys, outs = get_metrics(fc_model, valid_loader, seed=1, exp=False, takeLast=False)
+# accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
+
+# # Print evaluation metrics
+# print(f"Fully Connected Model: Accuracy = {accuracy:.2f}, AUC = {auc_value:.2f}")
+
+# %%
+
+class FullyConnectedNet(BaseNet):
+    """A fully connected neural network with 6 layers, including the FeatureLayer."""
+
+    def __init__(
+        self,
+        num_genes: int,
+        num_features: int = 3,
+        lr: float = 0.001,
+        scheduler: str="lambda"
+    ):
+        """Initialize.
+        :param num_genes: number of genes in dataset
+        :param num_features: number of features for each gene
+        :param lr: learning rate
+        """
+        super().__init__(lr=lr, scheduler=scheduler)
+        self.num_genes = num_genes
+        self.num_features = num_features
+
+        self.network = nn.Sequential(
+            FeatureLayer(self.num_genes, self.num_features),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, self.num_genes),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        """ Forward pass through the fully connected network. """
+        return self.network(x)
+
+    def step(self, batch, kind: str) -> dict:
+        """Step function executed by lightning trainer module."""
+        # run the model and calculate loss
+        x, y_true = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y_true)
+
+        # assess accuracy
+        correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
+        total = len(y_true)
+        batch_dict = {
+            "loss": loss,
+            # correct and total will be used at epoch end
+            "correct": correct,
+            "total": total,
+        }
+        return batch_dict
