@@ -7,3 +7,4 @@ wandb/
 randomized_reactome/
 models/
 rf-baseline.py
+/figures/

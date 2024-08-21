@@ -262,7 +262,7 @@ reactome_kws = dict(
 # Loop to generate and evaluate multiple random graphs
 device = torch.device("cuda")
 num_random_graphs = 1
-n_epochs = 100
+n_epochs = 10
 results = []
 
 for i in range(num_random_graphs):
@@ -354,65 +354,6 @@ output_size = 1  # Example output size
 # trainer.fit(sparse_model, train_loader, valid_loader)
 # trainer.test(sparse_model, test_loader)
 
-
-class FullyConnectedNet(BaseNet):
-    """A fully connected neural network with 6 layers, including the FeatureLayer."""
-
-    def __init__(
-        self,
-        num_genes: int,
-        num_features: int = 3,
-        lr: float = 0.001,
-        scheduler: str="lambda"
-    ):
-        """Initialize.
-        :param num_genes: number of genes in dataset
-        :param num_features: number of features for each gene
-        :param lr: learning rate
-        """
-        super().__init__(lr=lr, scheduler=scheduler)
-        self.num_genes = num_genes
-        self.num_features = num_features
-
-        self.network = nn.Sequential(
-            FeatureLayer(self.num_genes, self.num_features),
-            nn.Tanh(),
-            nn.Linear(self.num_genes, 128),
-            nn.Tanh(),
-            nn.Linear(128, 128),
-            nn.Tanh(),
-            nn.Linear(128, 128),
-            nn.Tanh(),
-            nn.Linear(128, 128),
-            nn.Tanh(),
-            nn.Linear(128, 128),
-            nn.Tanh(),
-            nn.Linear(128, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, x):
-        """ Forward pass through the fully connected network. """
-        return self.network(x)
-
-    def step(self, batch, kind: str) -> dict:
-        """Step function executed by lightning trainer module."""
-        # run the model and calculate loss
-        x, y_true = batch
-        y_hat = self(x)
-        loss = F.binary_cross_entropy(y_hat, y_true)
-
-        # assess accuracy
-        correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
-        total = len(y_true)
-        batch_dict = {
-            "loss": loss,
-            # correct and total will be used at epoch end
-            "correct": correct,
-            "total": total,
-        }
-        return batch_dict
-
 # %%
 device = torch.device("cuda")
 num_sparse_models = 1
@@ -472,241 +413,74 @@ for i, result in enumerate(results):
     print(f"Sparse Model {i+1}: Accuracy = {result['accuracy']:.2f}, AUC = {result['auc']:.2f}, precision = {result['precision']:.2f}, recall = {result['recall']:.2f}")
 
 # %%
+# train baseline NN
 
-# import torch.nn as nn
-# import torch.optim as optim
+# Initialize the model
+input_size = dataset[0][0].numel()  # Flatten the input
+hidden_size = 128
+output_size = 1
 
-# class FullyConnectedNet(pl.LightningModule):
-#     def __init__(self, num_genes, num_features, n_layers=6, lr=0.001, l1_lambda=0.01):
-#         super(FullyConnectedNet, self).__init__()
-#         layers = []
-#         current_size = num_genes
-#         for i in range(n_layers):
-#             next_size = max(num_genes // (2 ** i), 1)  # Gradually decrease the size of the layers
-#             layers.append(nn.Linear(current_size, next_size))
-#             layers.append(nn.ReLU())
-#             current_size = next_size
+flattendNN = FullyConnectedNet_flatten(input_size=input_size, hidden_size=hidden_size, output_size=output_size, lr=lr)
 
-#         self.feature_layer = FeatureLayer(num_genes, num_features)
-#         self.network = nn.Sequential(*layers)
-#         self.output_layer = nn.Linear(current_size, 1)  # Assuming binary classification
-#         self.lr = lr
-#         self.l1_lambda = l1_lambda
+# Function to run the training and evaluation loop
+def run_training_and_evaluation(model, train_loader, valid_loader, num_runs, n_epochs, model_save_dir, figure_save_path):
+    results = []
 
-#     def forward(self, x):
-#         x = self.feature_layer(x)
-#         x = self.network(x)
-#         x = self.output_layer(x)
-#         return x
+    for i in range(num_runs):
+        print(f"Running full model {i+1}/{num_runs}")
 
-#     def configure_optimizers(self):
-#         optimizer = optim.Adam(self.parameters(), lr=self.lr, weight_decay=0)
-#         return optimizer
+        # Train the model
+        trainer = pl.Trainer(
+            accelerator="auto",
+            max_epochs=n_epochs,
+            logger=logger
+        )
+        trainer.fit(model, train_loader, valid_loader)
 
-#     def l1_regularization_loss(self):
-#         l1_loss = 0
-#         for param in self.parameters():
-#             l1_loss += torch.norm(param, 1)
-#         return self.l1_lambda * l1_loss
+        # Evaluate the model
+        fpr, tpr, auc_value, ys, outs = get_metrics(full_model, valid_loader, seed=1, exp=False, takeLast=False)
+        accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
+        results.append({
+            "model": model,
+            "accuracy": accuracy,
+            "auc": auc_value,
+            "fpr": fpr,
+            "tpr": tpr,
+            "precision": precision_score(ys, outs[:, 1] > 0.5),
+            "recall": recall_score(ys, outs[:, 1] > 0.5)
+        })
 
-#     def training_step(self, batch, batch_idx):
-#         x, y = batch
-#         outputs = self.forward(x)
-#         print(outputs)
-#         loss = F.binary_cross_entropy(outputs, y)
+        # Save the model
+        model_path = os.path.join(model_save_dir, f"full_model_{i+1}.pth")
+        torch.save(model.state_dict(), model_path)
+        print(f"Model {i+1} saved to {model_path}")
 
-#         # L1 regularization
-#         l1_loss = self.l1_regularization_loss()
-#         total_loss = loss + l1_loss
+    # Plot AUC curves
+    plt.figure()
+    # plot orig
+    plt.plot(original_fpr, original_tpr, label=f"Original Model (AUC = {original_auc:.2f})")
+    # plot all randoms
+    for i, result in enumerate(results):
+        plt.plot(result["fpr"], result["tpr"], label=f"Model {i+1} (AUC = {result['auc']:.2f})")
 
-#         self.log('train_loss', total_loss)
-#         return total_loss
+    plt.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.title("Receiver Operating Characteristic (ROC) Curve")
+    plt.legend(loc="lower right")
+    plt.savefig(figure_save_path)
+    plt.show()
 
-#     def validation_step(self, batch, batch_idx):
-#         x, y = batch
-#         outputs = self.forward(x)
-#         print(outputs)
-#         loss = F.binary_cross_entropy(outputs, y)
-#         self.log('val_loss', loss)
-#         return loss
 
-# # Define model parameters
-# lr = 0.001
-# l1_lambda = 0.01
 
-# # Initialize the model
-# fc_model = FullyConnectedNet(num_genes=num_genes, num_features=num_features, n_layers=6, lr=lr, l1_lambda=l1_lambda)
-
-# # # Wrap the model with a Lightning module
-# # fc_trainer_model = FullyConnectedNet(model=fc_model, lr=lr, l1_lambda=l1_lambda)
-
-# # Train the model
-# trainer = pl.Trainer(
-#     accelerator="auto",
-#     max_epochs=n_epochs,
-#     logger=logger
-# )
-# trainer.fit(fc_model, train_loader, valid_loader)
-
-# # Evaluate the model
-# fpr, tpr, auc_value, ys, outs = get_metrics(fc_model, valid_loader, seed=1, exp=False, takeLast=False)
-# accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
-
-# # Print evaluation metrics
-# print(f"Fully Connected Model: Accuracy = {accuracy:.2f}, AUC = {auc_value:.2f}")
+# Define paths for saving models and figures
+model_save_dir = "models"
+figure_save_path = "figures/roc_curve.png"
 
 # %%
+# Run the training and evaluation loop
+run_training_and_evaluation(flattendNN, train_loader, valid_loader, num_runs=2, n_epochs=2, model_save_dir=model_save_dir, figure_save_path=figure_save_path)
 
-# class FullyConnectedNet(BaseNet):
-#     """A fully connected neural network with 6 layers, including the FeatureLayer."""
+# %%
+run_training_and_evaluation(full_model, train_loader, valid_loader, num_runs=2, n_epochs=2, model_save_dir=model_save_dir, figure_save_path=figure_save_path)
 
-#     def __init__(
-#         self,
-#         num_genes: int,
-#         num_features: int = 3,
-#         lr: float = 0.001,
-#         scheduler: str="lambda"
-#     ):
-#         """Initialize.
-#         :param num_genes: number of genes in dataset
-#         :param num_features: number of features for each gene
-#         :param lr: learning rate
-#         """
-#         super().__init__(lr=lr, scheduler=scheduler)
-#         self.num_genes = num_genes
-#         self.num_features = num_features
-
-#         self.network = nn.Sequential(
-#             FeatureLayer(self.num_genes, self.num_features),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, self.num_genes),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, self.num_genes),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, self.num_genes),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, self.num_genes),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, self.num_genes),
-#             nn.Tanh(),
-#             nn.Linear(self.num_genes, 1),
-#             nn.Sigmoid()
-#         )
-
-#     def forward(self, x):
-#         """ Forward pass through the fully connected network. """
-#         return self.network(x)
-
-#     def step(self, batch, kind: str) -> dict:
-#         """Step function executed by lightning trainer module."""
-#         # run the model and calculate loss
-#         x, y_true = batch
-#         y_hat = self(x)
-#         loss = F.binary_cross_entropy(y_hat, y_true)
-
-#         # assess accuracy
-#         correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
-#         total = len(y_true)
-#         batch_dict = {
-#             "loss": loss,
-#             # correct and total will be used at epoch end
-#             "correct": correct,
-#             "total": total,
-#         }
-#         return batch_dict
-
-# %% 
-
-# import torch
-# import torch.nn as nn
-# import torch.optim as optim
-# import torchmetrics
-# import torch.nn.functional as F
-# import pytorch_lightning as pl
-
-# class SparseNN(pl.LightningModule):
-#     def __init__(self, num_genes, num_features, hidden_size, output_size, lr=0.001, l1_lambda=0.01):
-#         super(SparseNN, self).__init__()
-#         self.lr = lr
-#         self.l1_lambda = l1_lambda
-
-#         self.feature_layer = FeatureLayer(num_genes, num_features)
-
-#         self.layers = nn.ModuleList([
-#             nn.Linear(num_genes, hidden_size),
-#             nn.Linear(hidden_size, hidden_size),
-#             nn.Linear(hidden_size, hidden_size),
-#             nn.Linear(hidden_size, hidden_size),
-#             nn.Linear(hidden_size, hidden_size),
-#             nn.Linear(hidden_size, hidden_size),
-#             nn.Linear(hidden_size, output_size)
-#         ])
-
-#         self.activation = nn.ReLU()
-
-#         # Define accuracy metric
-#         self.accuracy = torchmetrics.Accuracy(task="binary")
-
-#     def forward(self, x):
-#         x = self.feature_layer(x)
-#         for layer in self.layers[:-1]:
-#             x = self.activation(layer(x))
-#         logits = self.layers[-1](x)
-#         return logits
-
-#     def configure_optimizers(self):
-#         optimizer = optim.Adam(self.parameters(), lr=self.lr)
-#         return optimizer
-
-#     def training_step(self, batch, batch_idx):
-#         x, y = batch
-#         logits = self(x)
-#         print(logits)
-#         loss = F.binary_cross_entropy_with_logits(logits, y)
-
-#         # L1 regularization
-#         l1_norm = sum(p.abs().sum() for p in self.parameters())
-#         loss = loss + self.l1_lambda * l1_norm
-
-#         # Calculate and log accuracy
-#         preds = torch.round(torch.sigmoid(logits))
-#         acc = self.accuracy(preds, y)
-#         self.log('train_acc', acc, prog_bar=True)
-        
-#         self.log('train_loss', loss)
-#         return loss
-
-#     def validation_step(self, batch, batch_idx):
-#         x, y = batch
-#         logits = self(x)
-#         print(logits)
-#         loss = F.binary_cross_entropy_with_logits(logits, y)
-
-#         # L1 regularization
-#         l1_norm = sum(p.abs().sum() for p in self.parameters())
-#         loss = loss + self.l1_lambda * l1_norm
-
-#         # Calculate and log accuracy
-#         preds = torch.round(torch.sigmoid(logits))
-#         acc = self.accuracy(preds, y)
-#         self.log('val_acc', acc, prog_bar=True)
-        
-#         self.log('val_loss', loss)
-#         return loss
-
-#     def test_step(self, batch, batch_idx):
-#         x, y = batch
-#         logits = self(x)
-#         loss = F.binary_cross_entropy_with_logits(logits, y)
-
-#         # L1 regularization
-#         l1_norm = sum(p.abs().sum() for p in self.parameters())
-#         loss = loss + self.l1_lambda * l1_norm
-
-#         # Calculate and log accuracy
-#         preds = torch.round(torch.sigmoid(logits))
-#         acc = self.accuracy(preds, y)
-#         self.log('test_acc', acc, prog_bar=True)
-        
-#         self.log('test_loss', loss)
-#         return loss

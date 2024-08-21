@@ -3,6 +3,11 @@
 # https://github.com/zhanglab-aim/cancer-net/blob/main/cancernet/util/tensor.py
 
 import torch
+import torch.optim as optim
+from sklearn.metrics import accuracy_score, roc_auc_score
+import torch.nn.functional as F
+import pytorch_lightning as pl
+from typing import Tuple, List
 
 def scatter_nd(
     indices: torch.Tensor, weights: torch.Tensor, shape: tuple
@@ -29,16 +34,6 @@ def scatter_nd(
 
 
 # %% 
-# pythorch lighning stuff to train the model(s)
-"""Scaffolding for building PyTorch Lightning modules."""
-
-import torch
-import torch.nn.functional as F
-import pytorch_lightning as pl
-
-from typing import Tuple, List
-
-
 class BaseNet(pl.LightningModule):
     """A basic scaffold for our modules, with default optimizer, scheduler, and loss
     function, and simple logging.
@@ -326,4 +321,134 @@ class PNet(BaseNet):
             "total": total,
         }
         return batch_dict
+
+
+
+class FullyConnectedNet(BaseNet):
+    """A fully connected neural network with 6 layers, including the FeatureLayer."""
+
+    def __init__(
+        self,
+        num_genes: int,
+        num_features: int = 3,
+        hidden_size: int = 128,
+        lr: float = 0.001,
+        scheduler: str="lambda"
+    ):
+        """Initialize.
+        :param num_genes: number of genes in dataset
+        :param num_features: number of features for each gene
+        :param lr: learning rate
+        """
+        super().__init__(lr=lr, scheduler=scheduler)
+        self.num_genes = num_genes
+        self.num_features = num_features
+
+        self.network = nn.Sequential(
+            FeatureLayer(self.num_genes, self.num_features),
+            nn.Tanh(),
+            nn.Linear(self.num_genes, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, 1),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        """ Forward pass through the fully connected network. """
+        return self.network(x)
+
+    def step(self, batch, kind: str) -> dict:
+        """Step function executed by lightning trainer module."""
+        # run the model and calculate loss
+        x, y_true = batch
+        y_hat = self(x)
+        loss = F.binary_cross_entropy(y_hat, y_true)
+
+        # assess accuracy
+        correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
+        total = len(y_true)
+        batch_dict = {
+            "loss": loss,
+            # correct and total will be used at epoch end
+            "correct": correct,
+            "total": total,
+        }
+        return batch_dict
+    
+
+# Define the fully connected neural network
+class FullyConnectedNet_flatten(pl.LightningModule):
+    def __init__(self, input_size, hidden_size, output_size, lr=0.001):
+        super(FullyConnectedNet_flatten, self).__init__()
+        self.lr = lr
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.Tanh(),
+            nn.Linear(hidden_size, output_size),
+            nn.Sigmoid()
+        )
+        self.val_preds = []
+        self.val_labels = []
+
+    def forward(self, x):
+        x = self.flatten_data(x).float()
+        return self.network(x)
+
+    def configure_optimizers(self):
+        return optim.Adam(self.parameters(), lr=self.lr)
+
+    # Flatten the input data
+    def flatten_data(self, x):
+        return x.view(x.size(0), -1)
+
+    def training_step(self, batch, batch_idx):
+        x, y = batch
+        # x = x.float()
+        # y = y.float()
+        outputs = self(x)
+        loss = nn.BCELoss()(outputs, y)
+        self.log('train_loss', loss)
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y = batch
+        # x = x.float()
+        # y = y.float()
+        outputs = self(x)
+        loss = nn.BCELoss()(outputs, y)
+        self.log('val_loss', loss)
+        self.val_preds.append(outputs.cpu().numpy())
+        self.val_labels.append(y.cpu().numpy())
+        return {'val_loss': loss, 'preds': outputs, 'labels': y}
+
+    def on_validation_epoch_end(self):
+        all_preds = np.concatenate(self.val_preds)
+        all_labels = np.concatenate(self.val_labels)
+        accuracy = accuracy_score(all_labels, all_preds > 0.5)
+        auc = roc_auc_score(all_labels, all_preds)
+
+        self.log('val_accuracy', accuracy)
+        self.log('val_auc', auc)
+
+        # Clear the lists for the next epoch
+        self.val_preds.clear()
+        self.val_labels.clear()
 
