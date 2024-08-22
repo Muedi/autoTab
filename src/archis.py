@@ -389,6 +389,7 @@ class FullyConnectedNet_flatten(pl.LightningModule):
     def __init__(self, input_size, hidden_size, output_size, lr=0.001):
         super(FullyConnectedNet_flatten, self).__init__()
         self.lr = lr
+        self.flatten = nn.Flatten()
         self.network = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.Tanh(),
@@ -409,7 +410,8 @@ class FullyConnectedNet_flatten(pl.LightningModule):
         self.val_labels = []
 
     def forward(self, x):
-        x = self.flatten_data(x).float()
+        # x = self.flatten_data(x).float()
+        x = self.flatten(x)
         return self.network(x)
 
     def configure_optimizers(self):
@@ -452,3 +454,114 @@ class FullyConnectedNet_flatten(pl.LightningModule):
         self.val_preds.clear()
         self.val_labels.clear()
 
+
+class PNet_flatten(BaseNet):
+    """Implementation of the pnet without the feature layer, but the input is flattened.
+    """
+
+    def __init__(
+        self,
+        layers,
+        num_genes: int,
+        num_features: int = 3,
+        lr: float = 0.001,
+        intermediate_outputs: bool = True,
+        class_weights: bool=True,
+        scheduler: str="lambda"
+    ):
+        """Initialize.
+        :param layers: list of pandas dataframes describing the pnet masks for each
+            layer
+        :param num_genes: number of genes in dataset
+        :param num_features: number of features for each gene
+        :param lr: learning rate
+        """
+        super().__init__(lr=lr,scheduler=scheduler)
+        self.class_weights = class_weights
+        self.layers = layers
+        self.num_genes = num_genes
+        self.num_features = num_features
+        self.intermediate_outputs = intermediate_outputs
+        self.network = nn.ModuleList()
+        self.intermediate_outs = nn.ModuleList()
+
+        # Flatten the input
+        self.flatten = nn.Flatten()
+
+        # First layer with flattened input
+        self.network.append(
+            nn.Sequential(
+                nn.Linear(self.num_genes * self.num_features, self.num_genes),
+                nn.Tanh()
+            )
+        )
+
+        ## Taken from pnet
+        self.loss_weights = [2, 7, 20, 54, 148, 400]
+        if len(self.layers) > 5:
+            self.loss_weights = [2] * (len(self.layers) - 5) + self.loss_weights
+        for i, layer_map in enumerate(layers):
+            if i != (len(layers) - 1):
+                if i == 0:
+                    ## First layer has dropout of 0.5, the rest have 0.1
+                    dropout = 0.5
+                else:
+                    dropout = 0.1
+                    ## Build pnet layers
+                self.network.append(
+                    nn.Sequential(
+                        nn.Dropout(p=dropout), SparseLayer(layer_map), nn.Tanh()
+                    )
+                )
+                ## Build layers for intermediate output
+                if self.intermediate_outputs:
+                    self.intermediate_outs.append(
+                        nn.Sequential(nn.Linear(layer_map.shape[0], 1), nn.Sigmoid())
+                    )
+            else:
+                self.network.append(
+                    nn.Sequential(nn.Linear(layer_map.shape[0], 1), nn.Sigmoid())
+                )
+
+    def forward(self, x):
+        """ Forward pass, output a list containing predictions from each
+            intermediate layer, which can be weighted differently during
+            training & validation """
+
+        y = []
+        x = self.flatten(x)
+        x = self.network[0](x)
+        for aa in range(1, len(self.network) - 1):
+            y.append(self.intermediate_outs[aa - 1](x))
+            x = self.network[aa](x)
+        y.append(self.network[-1](x))
+
+        return y
+    
+    def step(self, batch, kind: str) -> dict:
+        """Step function executed by lightning trainer module."""
+        # run the model and calculate loss
+        x,y_true=batch
+        y_hat = self(x)
+        # print(y_hat)
+        loss = 0
+        if self.class_weights:
+            weights=y_true*0.75+0.75
+        else:
+            weights=None
+            
+        for aa, y in enumerate(y_hat):
+            ## Here we take a weighted average of the preditive outputs. Intermediate layers first
+            loss += self.loss_weights[aa] * F.binary_cross_entropy(y, y_true,weight=weights)
+        loss /= np.sum(self.loss_weights[aa])
+
+        correct = ((y_hat[-1] > 0.5).flatten() == y_true.flatten()).sum()
+        # assess accuracy
+        total = len(y_true)
+        batch_dict = {
+            "loss": loss,
+            # correct and total will be used at epoch end
+            "correct": correct,
+            "total": total,
+        }
+        return batch_dict

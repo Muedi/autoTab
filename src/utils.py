@@ -59,8 +59,8 @@ def get_metrics(
             
             output = model(tb)
             # Print model outputs for debugging
-            print("Model output:")
-            print(output)
+            # print("Model output:")
+            # print(output)
             
             # handle multiple outputs
             if not torch.is_tensor(output):

@@ -97,7 +97,7 @@ valid_loader = DataLoader(
 )
 
 # %%
-original_model = PNet(
+original_model = PNet_flatten(
     layers=maps,
     num_genes=maps[0].shape[0], # 9229
     lr=lr

@@ -154,6 +154,13 @@ original_model = PNet(
     lr=lr
 )
 
+
+original_flat_model = PNet_flatten(
+    layers=maps,
+    num_genes=maps[0].shape[0],  # 9229
+    lr=lr
+)
+
 print("Number of params:", sum(p.numel() for p in original_model.parameters()))
 logger = TensorBoardLogger(save_dir="tensorboard_log/")
 pbar = ProgressBar()
@@ -168,12 +175,28 @@ trainer = pl.Trainer(
 trainer.fit(original_model, train_loader, valid_loader)
 print(f"Training took {time.time() - t0:.1f} seconds.")
 
+t0 = time.time()
+trainer = pl.Trainer(
+    accelerator="auto",
+    max_epochs=n_epochs,
+    callbacks=pbar,
+    logger=logger,
+)
+trainer.fit(original_flat_model, train_loader, valid_loader)
+print(f"Training took {time.time() - t0:.1f} seconds.")
+
 # %%
 fpr_train, tpr_train, train_auc, _, _ = get_metrics(original_model, train_loader, exp=False)
 fpr_valid, tpr_valid, valid_auc, ys, outs = get_metrics(original_model, valid_loader, exp=False)
+
+fpr_train_flat, tpr_train_flat, train_auc_flat, _, _ = get_metrics(original_flat_model, train_loader, exp=False)
+fpr_valid_flat, tpr_valid_flat, valid_auc_flat, ys, outs = get_metrics(original_flat_model, valid_loader, exp=False)
+
 # save for later
 original_fpr, original_tpr, original_auc, original_ys, original_outs = get_metrics(original_model, valid_loader, exp=False)
 original_accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
+original_flat_fpr, original_flat_tpr, original_flat_auc, original_flat_ys, original_flat_outs = get_metrics(original_flat_model, valid_loader, exp=False)
+original_flat_accuracy = accuracy_score(ys, outs[:, 1] > 0.5)
 
 print("validation")
 print("accuracy", original_accuracy)
@@ -190,6 +213,7 @@ test_loader = DataLoader(
     drop_last=True,
 )
 fpr_test, tpr_test, test_auc, ys, outs = get_metrics(original_model, test_loader, exp=False)
+fpr_test_flat, tpr_test_flat, test_auc_flat, ys_flat, outs_flat = get_metrics(original_flat_model, test_loader, exp=False)
 
 print("test")
 print("accuracy", accuracy_score(ys, outs[:, 1] > 0.5))
@@ -203,6 +227,9 @@ fig, ax = plt.subplots()
 ax.plot(fpr_train, tpr_train, lw=2, label="train (area = %0.3f)" % train_auc)
 ax.plot(fpr_valid, tpr_valid, lw=2, label="validation (area = %0.3f)" % valid_auc)
 ax.plot(fpr_test, tpr_test, lw=2, label="test (area = %0.3f)" % test_auc)
+ax.plot(fpr_train_flat, tpr_train_flat, lw=2, label="flat: train (area = %0.3f)" % train_auc_flat)
+ax.plot(fpr_valid_flat, tpr_valid_flat, lw=2, label="flat: validation (area = %0.3f)" % valid_auc_flat)
+ax.plot(fpr_test_flat, tpr_test_flat, lw=2, label="flat: test (area = %0.3f)" % test_auc_flat)
 ax.plot([0, 1], [0, 1], color="black", lw=1, linestyle="--")
 ax.set_xlim([0.0, 1.0])
 ax.set_ylim([0.0, 1.05])
@@ -210,6 +237,7 @@ ax.set_xlabel("False Positive Rate")
 ax.set_ylabel("True Positive Rate")
 ax.set_title("Receiver operating characteristic")
 ax.legend(loc="lower right", frameon=False)
+fig.savefig("figures/roc curves_PNET_vs_PNet_flat.png")
 
 # %%
 # Loop to generate and evaluate multiple random graphs
@@ -259,7 +287,7 @@ plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
 plt.title("Receiver Operating Characteristic (ROC) Curve")
 plt.legend(loc="lower right")
-plt.savefig("figures/roc_curve_randomized.png")
+plt.savefig("figures/roc_curve_PNet_randomized_network.png")
 plt.show()
 
 # %%
