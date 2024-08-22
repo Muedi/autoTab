@@ -1,0 +1,6 @@
+,model,accuracy,auc,aupr,f1,precision,recall
+0,Original Model,0.775,0.892,0.845,0.633,0.477,0.939
+1,Original Flat Model,0.775,0.846,0.744,0.676,0.632,0.727
+2,Randomized PNet,0.833,0.888,0.833,0.702,0.833,0.606
+3,Flattened NN,0.725,0.803,0.731,0.611,0.564,0.667
+4,Full Model,0.784,0.917,0.877,0.725,0.617,0.879
