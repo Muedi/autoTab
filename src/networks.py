@@ -1,11 +1,8 @@
 # %%
 import os
-import pandas as pd
-
-
-
 import re
 import pandas as pd
+import random
 
 # utility fzunction to load gmt files and convert to pandas frame
 def load_gmt(filename: str, genes_col: int = 1, pathway_col: int = 0) -> pd.DataFrame:
@@ -172,6 +169,71 @@ class ReactomeNetwork:
     def get_layers(
         self, n_levels: int, direction: str = "root_to_leaf"
     ) -> List[Dict[str, List[str]]]:
+        """Generate layers of nodes from root to leaves or vice versa.
+
+        Depending on the direction specified, this function returns the layers of the network.
+        """
+        if direction == "root_to_leaf":
+            net = self.get_completed_network(n_levels)
+            layers = get_layers_from_net(net, n_levels)
+        else:
+            net = self.get_completed_network(5)
+            layers = get_layers_from_net(net, 5)
+            layers = layers[5 - n_levels : 5]
+
+        # Get the last layer (genes level)
+        terminal_nodes = [
+            n for n, d in net.out_degree() if d == 0
+        ]  # Set of terminal pathways
+        # Find genes belonging to these pathways
+        genes_df = self.reactome.pathway_genes
+
+        dict = {}
+        missing_pathways = []
+        for p in terminal_nodes:
+            pathway_name = re.sub("_copy.*", "", p)
+            genes = genes_df[genes_df["group"] == pathway_name]["gene"].unique()
+            if len(genes) == 0:
+                missing_pathways.append(pathway_name)
+            dict[pathway_name] = genes
+
+        layers.append(dict)
+        return layers
+
+
+class Randomized_reactome(ReactomeNetwork):
+    def __init__(self, reactome_kws):
+        super().__init__(reactome_kws)
+        self.netx = self.randomize_edges_by_layer(self.netx)
+
+    def randomize_edges_by_layer(self, original_graph: nx.DiGraph) -> nx.DiGraph:
+        """Randomize the order of edges between nodes by layer while ensuring the graph remains connected."""
+        # Get the layers of the original graph
+        layers = self.get_layers(n_levels=6, direction="root_to_leaf")
+
+        # Create a new graph with the same nodes
+        random_graph = nx.DiGraph()
+        random_graph.add_nodes_from(original_graph.nodes)
+
+        # Randomize edges within each layer
+        for layer in layers:
+            pathway_nodes = []
+            gene_nodes = []
+            for pathway, genes in layer.items():
+                for gene in genes:
+                    if original_graph.has_edge(pathway, gene):
+                        pathway_nodes.append(pathway)
+                        gene_nodes.append(gene)
+            random.shuffle(gene_nodes)
+            for source, target in zip(pathway_nodes, gene_nodes):
+                random_graph.add_edge(source, target)
+
+        # Ensure the graph is connected
+        random_graph = complete_network(random_graph, n_levels=6)
+
+        return random_graph
+
+    def get_layers(self, n_levels: int, direction: str = "root_to_leaf") -> List[Dict[str, List[str]]]:
         """Generate layers of nodes from root to leaves or vice versa.
 
         Depending on the direction specified, this function returns the layers of the network.
