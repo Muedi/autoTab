@@ -1,15 +1,46 @@
 # %%
+# %%
+# dfki color map
+# def hex_to_rgb(hex):
+#     hex = hex.lstrip('#')
+#     return tuple(int(hex[i:i+2], 16) / 255.0 for i in (0, 2, 4))
+
+# colors_dict = {
+# #    'BRIGHT': '#FFFFFF',
+#     'ABISKO_GREEN': '#6ABFA3',
+#     'OSAKA_RED': '#EC619F',
+#     'ERFOUD_ORANGE': '#F7A712',
+#     'GUAM_BLUE': '#1D3A8F',
+#     'CRIMSON': '#DC143C',
+#     'VIBRANT_PURPLE': '#8A2BE2',
+#     'SHADY_SKY_BLUE': '#4f9fa8',
+#     'BRIGHT_YELLOW': '#FFD700',
+#     # 'YELLOW': '#FFF381',
+#     # 'MOON_GREY': '#D7DBDD',
+#     # 'DARK': '#06171C',
+#     # 'LIGHTER_GREEN': '#98CFBA',
+# }
+# rgb_colors = [hex_to_rgb(color) for color in colors_dict.values()]
+# map = colors.LinearSegmentedColormap.from_list('dfki', rgb_colors, N=len(rgb_colors))
+# colormaps.register(cmap=map)
+# plt.set_cmap(map)
+# %%
 # Import necessary libraries
 import time
 import os
+from pathlib import Path
+import pandas as pd
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+from matplotlib import colormaps
+
 import torch
 import torch_geometric.transforms as T
 from torch.utils.data.sampler import SubsetRandomSampler
 from torch_geometric.loader import DataLoader
-import pytorch_lightning as pl
-import matplotlib.pyplot as plt
-import pandas as pd
 
+import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger, TensorBoardLogger
 from pytorch_lightning.callbacks.progress.progress_bar import ProgressBar
 from sklearn.metrics import (
@@ -31,7 +62,7 @@ def run_training_and_evaluation(model,
     n_epochs,
     model_save_dir,
     save_fig=True,
-    figure_save_path="figures/roc-curve-default.png"
+    figure_save_path="{}/roc-curve-.format(outfolder)default.png"
     ):
 
     results = []
@@ -96,12 +127,27 @@ def run_training_and_evaluation(model,
 
 # %%
 # Declare variables, epochs and iteration numbers
-n_epochs = 100
-batch_size = 10
-lr = 0.001
-num_workers = 0
-num_random_graphs = 5
-num_runs = 5
+test = True
+if test: 
+    n_epochs = 2
+    batch_size = 10
+    lr = 0.001
+    num_workers = 0
+    num_random_graphs = 1
+    num_runs = 1
+    outfolder = "test"
+    pathobj = Path(outfolder)
+    Path.mkdir(pathobj, exist_ok=True)
+else:
+    n_epochs = 100
+    batch_size = 10
+    lr = 0.001
+    num_workers = 0
+    num_random_graphs = 5
+    num_runs = 5
+    outfolder = "output"
+    pathobj = Path(outfolder)
+    Path.mkdir(pathobj, exist_ok=True)
 
 # %%
 # dataset
@@ -244,7 +290,7 @@ ax.set_xlabel("False Positive Rate")
 ax.set_ylabel("True Positive Rate")
 ax.set_title("Receiver operating characteristic")
 ax.legend(loc="lower right", frameon=False)
-fig.savefig("figures/roc curves_PNET_vs_PNet_flat.png")
+fig.savefig("{}/roc curves_PNET_vs_PNet_flat.png".format(outfolder))
 
 # %%
 # Loop to generate and evaluate multiple random graphs
@@ -306,7 +352,7 @@ plt.xlabel("False Positive Rate")
 plt.ylabel("True Positive Rate")
 plt.title("Receiver Operating Characteristic (ROC) Curve")
 plt.legend(loc="lower right")
-plt.savefig("figures/roc_curve_PNet_randomized_network.png")
+plt.savefig("{}/roc_curve_PNet_randomized_network.png".format(outfolder))
 plt.show()
 
 # %%
@@ -325,7 +371,7 @@ hidden_size = 128
 output_size = 1
 
 flattendNN = FullyConnectedNet_flatten(input_size=input_size, hidden_size=hidden_size, output_size=output_size, lr=lr)
-figure_save_path = "figures/roc_curve_fullNN_featureLayer.png"
+figure_save_path = "{}/roc_curve_fullNN_featureLayer.png".format(outfolder)
 
 # Run the training and evaluation loop
 flattendNN_results = run_training_and_evaluation(flattendNN, train_loader, valid_loader,
@@ -347,7 +393,7 @@ mean_flattendNN_metrics = {
 # %%
 # Run the training and evaluation loop for the full model
 full_model = FullyConnectedNet(num_genes=maps[0].shape[0], num_features=3)
-figure_save_path = "figures/roc_curve_fullNN_featureLayer_flattened.png"
+figure_save_path = "{}/roc_curve_fullNN_featureLayer_flattened.png".format(outfolder)
 # Run the training and evaluation loop
 full_model_results = run_training_and_evaluation(full_model, train_loader, valid_loader,
                             num_runs=num_runs,
@@ -394,6 +440,6 @@ all_metrics = [
 # %%
 # Write metrics to CSV
 df = pd.DataFrame(all_metrics).round(3)
-df.to_csv("metrics_report.csv")
+df.to_csv("{}/metrics_report.csv".format(outfolder))
 
 print("Metrics report saved to metrics_report.csv")
