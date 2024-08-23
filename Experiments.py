@@ -129,7 +129,7 @@ def run_training_and_evaluation(model,
 # Declare variables, epochs and iteration numbers
 test = True
 if test: 
-    n_epochs = 2
+    n_epochs = 100
     batch_size = 10
     lr = 0.001
     num_workers = 0
@@ -371,7 +371,7 @@ hidden_size = 128
 output_size = 1
 
 flattendNN = FullyConnectedNet_flatten(input_size=input_size, hidden_size=hidden_size, output_size=output_size, lr=lr)
-figure_save_path = "{}/roc_curve_fullNN_featureLayer.png".format(outfolder)
+figure_save_path = "{}/roc_curve_fullNN_flattened.png".format(outfolder)
 
 # Run the training and evaluation loop
 flattendNN_results = run_training_and_evaluation(flattendNN, train_loader, valid_loader,
@@ -389,11 +389,34 @@ mean_flattendNN_metrics = {
     "f1": sum([r["f1"] for r in flattendNN_results]) / len(flattendNN_results),
     "aupr": sum([r["aupr"] for r in flattendNN_results]) / len(flattendNN_results)
 }
+# %%
+flattendNN_reg = FullyConnectedNet_flatten(input_size=input_size, hidden_size=hidden_size, 
+                                           output_size=output_size, lr=lr, l1_lambda=0.001)
+figure_save_path = "{}/roc_curve_fullNN_flattened_regularized.png".format(outfolder)
+
+# Run the training and evaluation loop
+flattendNN_results = run_training_and_evaluation(flattendNN_reg, train_loader, valid_loader,
+                            num_runs=num_runs,
+                            n_epochs=n_epochs,
+                            model_save_dir=model_save_dir, figure_save_path=figure_save_path)
+
+# Calculate mean metrics for flattened NN
+mean_flattendNN_reg_metrics = {
+    "model": "Full NN flattened regularized",
+    "accuracy": sum([r["accuracy"] for r in flattendNN_results]) / len(flattendNN_results),
+    "auc": sum([r["auc"] for r in flattendNN_results]) / len(flattendNN_results),
+    "precision": sum([r["precision"] for r in flattendNN_results]) / len(flattendNN_results),
+    "recall": sum([r["recall"] for r in flattendNN_results]) / len(flattendNN_results),
+    "f1": sum([r["f1"] for r in flattendNN_results]) / len(flattendNN_results),
+    "aupr": sum([r["aupr"] for r in flattendNN_results]) / len(flattendNN_results)
+}
+
+
 
 # %%
 # Run the training and evaluation loop for the full model
 full_model = FullyConnectedNet(num_genes=maps[0].shape[0], num_features=3)
-figure_save_path = "{}/roc_curve_fullNN_featureLayer_flattened.png".format(outfolder)
+figure_save_path = "{}/roc_curve_fullNN_featureLayer.png".format(outfolder)
 # Run the training and evaluation loop
 full_model_results = run_training_and_evaluation(full_model, train_loader, valid_loader,
                             num_runs=num_runs,
@@ -401,8 +424,30 @@ full_model_results = run_training_and_evaluation(full_model, train_loader, valid
                             model_save_dir=model_save_dir, figure_save_path=figure_save_path)
 
 # Calculate mean metrics for full model
-mean_full_model_metrics = {
-    "model": "Full Model",
+mean_full_NN_metrics = {
+    "model": "Full NN featureLayer",
+    "accuracy": sum([r["accuracy"] for r in full_model_results]) / len(full_model_results),
+    "auc": sum([r["auc"] for r in full_model_results]) / len(full_model_results),
+    "precision": sum([r["precision"] for r in full_model_results]) / len(full_model_results),
+    "recall": sum([r["recall"] for r in full_model_results]) / len(full_model_results),
+    "f1": sum([r["f1"] for r in full_model_results]) / len(full_model_results),
+    "aupr": sum([r["aupr"] for r in full_model_results]) / len(full_model_results)
+}
+
+# %%
+# %%
+# Run the training and evaluation loop for the full model
+full_model_reg = FullyConnectedNet(num_genes=maps[0].shape[0], num_features=3, l1_lambda=0.00001)
+figure_save_path = "{}/roc_curve_fullNN_featureLayer_regularized.png".format(outfolder)
+# Run the training and evaluation loop
+full_model_results = run_training_and_evaluation(full_model_reg, train_loader, valid_loader,
+                            num_runs=num_runs,
+                            n_epochs=n_epochs,
+                            model_save_dir=model_save_dir, figure_save_path=figure_save_path)
+
+# Calculate mean metrics for full model
+mean_full_NN_reg_metrics = {
+    "model": "Full NN featureLayer regularized",
     "accuracy": sum([r["accuracy"] for r in full_model_results]) / len(full_model_results),
     "auc": sum([r["auc"] for r in full_model_results]) / len(full_model_results),
     "precision": sum([r["precision"] for r in full_model_results]) / len(full_model_results),
@@ -434,7 +479,9 @@ all_metrics = [
     },
     mean_randomized_metrics,
     mean_flattendNN_metrics,
-    mean_full_model_metrics
+    mean_flattendNN_reg_metrics,
+    mean_full_NN_metrics, 
+    mean_full_NN_reg_metrics
 ]
 
 # %%

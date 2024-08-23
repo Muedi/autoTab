@@ -436,6 +436,12 @@ class PNet_flatten(BaseNet):
         return batch_dict
 
 
+def count_nonzero_weights(model):
+    nonzero_weights = 0
+    for param in model.parameters():
+        nonzero_weights += (param != 0).sum().item()
+    return nonzero_weights
+
 class FullyConnectedNet(BaseNet):
     """A fully connected neural network with 6 layers, including the FeatureLayer."""
 
@@ -445,16 +451,19 @@ class FullyConnectedNet(BaseNet):
         num_features: int = 3,
         hidden_size: int = 128,
         lr: float = 0.001,
+        l1_lambda: float = 0.0,
         scheduler: str="lambda"
     ):
         """Initialize.
         :param num_genes: number of genes in dataset
         :param num_features: number of features for each gene
         :param lr: learning rate
+        :param l1_lambda: L1 regularization strength
         """
         super().__init__(lr=lr, scheduler=scheduler)
         self.num_genes = num_genes
         self.num_features = num_features
+        self.l1_lambda = l1_lambda
 
         self.network = nn.Sequential(
             FeatureLayer(self.num_genes, self.num_features),
@@ -484,6 +493,11 @@ class FullyConnectedNet(BaseNet):
         y_hat = self(x)
         loss = F.binary_cross_entropy(y_hat, y_true)
 
+        # Add L1 regularization
+        if self.l1_lambda > 0:
+            l1_norm = sum(p.abs().sum() for p in self.parameters())
+            loss += self.l1_lambda * l1_norm
+
         # assess accuracy
         correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
         total = len(y_true)
@@ -495,12 +509,23 @@ class FullyConnectedNet(BaseNet):
         }
         return batch_dict
     
+    def on_epoch_end(self):
+        nonzero_weights = count_nonzero_weights(self)
+        self.log('nonzero_weights', nonzero_weights)
+        print(f'Epoch {self.current_epoch}: Non-zero weights = {nonzero_weights}')
 
-# Define the fully connected neural network
 class FullyConnectedNet_flatten(BaseNet):
-    def __init__(self, input_size, hidden_size, output_size, lr=0.001, scheduler="lambda"):
+    def __init__(self,
+                input_size: int,
+                hidden_size: int,
+                output_size: int = 1,
+                lr: int = 0.001,
+                l1_lambda: int = 0.0,
+                scheduler: str = "lambda"
+    ):
         super().__init__(lr=lr, scheduler=scheduler)
         self.flatten = nn.Flatten()
+        self.l1_lambda = l1_lambda
         self.network = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.Tanh(),
@@ -529,6 +554,11 @@ class FullyConnectedNet_flatten(BaseNet):
         y_hat = self(x)
         loss = F.binary_cross_entropy(y_hat, y_true)
 
+        # Add L1 regularization
+        if self.l1_lambda > 0:
+            l1_norm = sum(p.abs().sum() for p in self.parameters())
+            loss += self.l1_lambda * l1_norm
+
         # assess accuracy
         correct = ((y_hat > 0.5).flatten() == y_true.flatten()).sum()
         total = len(y_true)
@@ -540,4 +570,7 @@ class FullyConnectedNet_flatten(BaseNet):
         }
         return batch_dict
 
-
+    def on_epoch_end(self):
+        nonzero_weights = count_nonzero_weights(self)
+        self.log('nonzero_weights', nonzero_weights)
+        print(f'Epoch {self.current_epoch}: Non-zero weights = {nonzero_weights}')
