@@ -26,6 +26,10 @@ from src import *
 
 # %%
 # Define functions
+def count_nonzero_weights(model):
+    nonzero_weights = sum(p.numel() for p in model.parameters() if p.abs().sum() > 0)
+    return nonzero_weights
+
 def run_training_and_evaluation(model,
     train_loader,
     valid_loader,
@@ -57,6 +61,8 @@ def run_training_and_evaluation(model,
         f1 = f1_score(ys, outs[:, 1] > 0.5)
         aupr = average_precision_score(ys, outs[:, 1])
 
+        nonzero_weights = count_nonzero_weights(model)
+
         results.append({
             "model": model,
             "accuracy": accuracy,
@@ -66,7 +72,8 @@ def run_training_and_evaluation(model,
             "precision": precision,
             "recall": recall,
             "f1": f1,
-            "aupr": aupr
+            "aupr": aupr,
+            "nonzero_weights": nonzero_weights
         })
 
         # Save the model
@@ -249,7 +256,8 @@ for l1_lambda in l1_lambda_values:
         "precision": sum([r["precision"] for r in full_model_results]) / len(full_model_results),
         "recall": sum([r["recall"] for r in full_model_results]) / len(full_model_results),
         "f1": sum([r["f1"] for r in full_model_results]) / len(full_model_results),
-        "aupr": sum([r["aupr"] for r in full_model_results]) / len(full_model_results)
+        "aupr": sum([r["aupr"] for r in full_model_results]) / len(full_model_results),
+        "nonzero_weights": sum([r["nonzero_weights"] for r in full_model_results]) / len(full_model_results)
     }
 
     results_dict[l1_lambda] = {
@@ -262,13 +270,14 @@ for l1_lambda in l1_lambda_values:
 all_metrics = [
     {
         "model": "Original Model",
-        l1_lambda: None,
+        "l1_lambda": None,
         "accuracy": original_accuracy,
         "auc": original_auc,
         "aupr": average_precision_score(original_ys, original_outs[:, 1]),
         "f1": f1_score(original_ys, original_outs[:, 1] > 0.5),
         "precision": precision_score(original_ys, original_outs[:, 1] > 0.5),
-        "recall": recall_score(original_ys, original_outs[:, 1] > 0.5)
+        "recall": recall_score(original_ys, original_outs[:, 1] > 0.5),
+        "nonzero_weights": count_nonzero_weights(original_model)
     },
     *[result["metrics"] for result in results_dict.values()]
 ]
@@ -306,7 +315,7 @@ plt.show()
 
 # %%
 # Create facet panel plot
-metrics = ["accuracy", "auc", "f1", "precision", "recall", "aupr"]
+metrics = ["accuracy", "auc", "f1", "precision", "recall", "nonzero_weights"]
 
 g = sns.FacetGrid(df.melt(id_vars=["model", "l1_lambda"], value_vars=metrics, var_name="metric", value_name="value"),
                   col="metric", col_wrap=3, sharey=False, height=4)

@@ -436,11 +436,11 @@ class PNet_flatten(BaseNet):
         return batch_dict
 
 
-def count_nonzero_weights(model):
-    nonzero_weights = 0
-    for param in model.parameters():
-        nonzero_weights += (param != 0).sum().item()
-    return nonzero_weights
+# def count_nonzero_weights(model):
+#     nonzero_weights = 0
+#     for param in model.parameters():
+#         nonzero_weights += (param != 0).sum().item()
+#     return nonzero_weights
 
 class FullyConnectedNet(BaseNet):
     """A fully connected neural network with 6 layers, including the FeatureLayer."""
