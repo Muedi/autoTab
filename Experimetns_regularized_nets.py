@@ -315,11 +315,11 @@ plt.show()
 
 # %%
 # Create facet panel plot
-metrics = ["accuracy", "auc", "f1", "precision", "recall", "nonzero_weights"]
+metrics = ["accuracy", "auc", "f1", "precision"] #, "recall", "nonzero_weights"]
 
 g = sns.FacetGrid(df.melt(id_vars=["model", "l1_lambda"], value_vars=metrics, var_name="metric", value_name="value"),
-                  col="metric", col_wrap=3, sharey=False, height=4)
-g.map(sns.lineplot, "l1_lambda", "value", marker="o")
+                  col="metric", col_wrap=2, sharey=False, height=4)
+g.map(sns.lineplot, "l1_lambda", "value", marker="o", color="#6ABFA3") # absiko green
 g.set_titles("{col_name}")
 g.set_axis_labels("L1 Regularization (lambda)", "Value")
 g.add_legend()
@@ -327,5 +327,5 @@ g.add_legend()
 plt.subplots_adjust(top=0.9)
 g.fig.suptitle("Model Performance with Different L1 Regularization Values")
 
-plt.savefig("{}/facet_plot.png".format(outfolder))
+plt.savefig("{}/facet_plot_poster.png".format(outfolder))
 plt.show()
