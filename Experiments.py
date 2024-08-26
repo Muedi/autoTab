@@ -127,9 +127,9 @@ def run_training_and_evaluation(model,
 
 # %%
 # Declare variables, epochs and iteration numbers
-test = True
+test = False
 if test: 
-    n_epochs = 100
+    n_epochs = 10
     batch_size = 10
     lr = 0.001
     num_workers = 0
@@ -391,7 +391,7 @@ mean_flattendNN_metrics = {
 }
 # %%
 flattendNN_reg = FullyConnectedNet_flatten(input_size=input_size, hidden_size=hidden_size, 
-                                           output_size=output_size, lr=lr, l1_lambda=0.001)
+                                           output_size=output_size, lr=lr, l1_lambda=0.00001)
 figure_save_path = "{}/roc_curve_fullNN_flattened_regularized.png".format(outfolder)
 
 # Run the training and evaluation loop

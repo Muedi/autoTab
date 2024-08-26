@@ -10,3 +10,5 @@ rf-baseline.py
 /figures/
 /test/
 /output/
+/output_regu/
+/output_depr/
