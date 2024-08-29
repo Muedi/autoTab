@@ -10,11 +10,11 @@ This is different from _typical_ graph neural network problems, because the bran
 ### Workpackages
 - [x] WP 1A: Build minimal running example of cancer-net (pytorch implementation of P-NET)
 - [x] WP 1B: Get P-NET Dataset
-- [] WP 2: Search for AutoML options, that provide single edge optimization
+- [ ] WP 2: Search for AutoML options, that provide single edge optimization
 
 Wp3 experiments with different architectures:
 - [x] PNET, but graph is randomized
 - [x] Fully connected net
 - [x] both with and without PNets 
-- [] introduce spareseness by regularization (done but not finished)
-- [] Introduce spareseness by mask: [] random [] with hierarcical network.
+- [ ] introduce spareseness by regularization (done but not finished)
+- [ ] Introduce spareseness by mask: [ ] random [ ] with hierarcical network.
