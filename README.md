@@ -10,13 +10,15 @@ This is different from _typical_ graph neural network problems, because the bran
 We had a Poster for this purpose on the JGU Workshop for AI for Scientific Discovery: 
 [Interpretable AutoML for biological knowledge discovery from multi-modal data.](http://dx.doi.org/10.13140/RG.2.2.31376.42244)
 The code here was used for the results shown on this poster. 
+Further work will, be simplifying the available code and streamlining the input of hierarchical structure to build NNs. Likely a functional instead of an object oriented approach would be more accessible.  
 
 ### Workpackages
-- [x] WP 1A: Build minimal running example of cancer-net (pytorch implementation of P-NET)
-- [x] WP 1B: Get P-NET Dataset
-- [ ] WP 2: Search for AutoML options, that provide single edge optimization
+- [x] Build minimal running example of cancer-net (pytorch implementation of P-NET)
+- [x] Get P-NET Dataset
+- [ ] Search for AutoML options, that provide single edge optimization
+- [ ] Simplify hierachical structure.  
 
-Wp3 experiments with different architectures:
+Experiments with different architectures:
 - [x] PNET, but graph is randomized
 - [x] Fully connected net
 - [x] both with and without PNets 
