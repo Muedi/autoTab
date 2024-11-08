@@ -7,6 +7,10 @@ In Biology, for example, these are usually termed "Biologically-Informed neural 
 More generally, we consider discovery any hierarchical structure for which observed features (genes) are the leaf nodes.
 This is different from _typical_ graph neural network problems, because the branch nodes (the pathways and processes) are not directly observed, but form hidden nodes or layers (including with skip connections) in the neural network.
 
+We had a Poster for this purpose on the JGU Workshop for AI for Scientific Discovery: 
+10.13140/RG.2.2.31376.42244
+The code here was used for the results shown on this poster. 
+
 ### Workpackages
 - [x] WP 1A: Build minimal running example of cancer-net (pytorch implementation of P-NET)
 - [x] WP 1B: Get P-NET Dataset
