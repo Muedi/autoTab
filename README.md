@@ -8,7 +8,7 @@ More generally, we consider discovery any hierarchical structure for which obser
 This is different from _typical_ graph neural network problems, because the branch nodes (the pathways and processes) are not directly observed, but form hidden nodes or layers (including with skip connections) in the neural network.
 
 We had a Poster for this purpose on the JGU Workshop for AI for Scientific Discovery: 
-10.13140/RG.2.2.31376.42244
+[Interpretable AutoML for biological knowledge discovery from multi-modal data.](http://dx.doi.org/10.13140/RG.2.2.31376.42244)
 The code here was used for the results shown on this poster. 
 
 ### Workpackages
